@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/select"
 import { HandCoins, PlayIcon } from 'lucide-react'
 import Image from 'next/image'
-import { GameState } from '@/app/page'
+import { GameState, Difficulty } from '@/app/page'
 import { cn } from '@/lib/utils';
 
 type ControlPanelProps = {
@@ -21,9 +21,20 @@ type ControlPanelProps = {
   betAmount: number;
   onBetAmountChange: (amount: number) => void;
   multiplier: number;
+  difficulty: Difficulty;
+  onDifficultyChange: (difficulty: Difficulty) => void;
 };
 
-export default function ControlPanel({ gameState, onPlay, onCashOut, betAmount, onBetAmountChange, multiplier }: ControlPanelProps) {
+export default function ControlPanel({ 
+    gameState, 
+    onPlay, 
+    onCashOut, 
+    betAmount, 
+    onBetAmountChange, 
+    multiplier,
+    difficulty,
+    onDifficultyChange
+}: ControlPanelProps) {
   
   const betAmounts = [100, 300, 500, 1000, 1500, 2000];
   const isRunning = gameState === 'running';
@@ -45,11 +56,20 @@ export default function ControlPanel({ gameState, onPlay, onCashOut, betAmount, 
         </div>
         
         <div className="flex items-center gap-2">
-          <select defaultValue="easy" disabled={isRunning} className="difficulty-select">
-              <option value="easy">Easy</option>
-              <option value="medium">Medium</option>
-              <option value="hard">Hard</option>
-          </select>
+           <Select 
+            value={difficulty} 
+            onValueChange={(value: Difficulty) => onDifficultyChange(value)} 
+            disabled={isRunning}
+          >
+            <SelectTrigger className="difficulty-select w-[120px]">
+              <SelectValue placeholder="Difficulty" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="easy">Easy</SelectItem>
+              <SelectItem value="medium">Medium</SelectItem>
+              <SelectItem value="hard">Hard</SelectItem>
+            </SelectContent>
+          </Select>
           
           {isRunning ? (
             <button 
