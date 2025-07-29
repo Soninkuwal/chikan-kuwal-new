@@ -1,6 +1,6 @@
 
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Sheet,
@@ -41,6 +41,8 @@ import { Input } from '../ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Badge } from '../ui/badge';
+import { app } from '@/lib/firebase';
+import { getDatabase, ref, onValue, off, update } from "firebase/database";
 
 type SidebarProps = {
   isOpen: boolean;
@@ -64,7 +66,7 @@ export function Sidebar({
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [chatTarget, setChatTarget] = useState<'admin' | 'owner' | null>(null);
   const { toast } = useToast();
-  const [currentUser, setCurrentUser] = useState({ name: 'User', email: 'user@example.com', avatar: 'https://placehold.co/100x100.png', avatarFallback: 'U', transactionHistory: [], betHistory: [] });
+  const [currentUser, setCurrentUser] = useState<any>({ name: 'User', email: 'user@example.com', avatar: '', avatarFallback: 'U', transactionHistory: [], betHistory: [] });
   const [tempUsername, setTempUsername] = useState(currentUser.name);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
 
@@ -76,19 +78,38 @@ export function Sidebar({
       supportInfo: 'For any support queries, please contact us at support@example.com or join our Telegram channel.',
   });
 
-  const updateSidebarData = () => {
-    const user = localStorage.getItem('currentUser');
-    if (user) {
-        const parsedUser = JSON.parse(user);
+  const updateSidebarData = useCallback(() => {
+    const userStr = localStorage.getItem('currentUser');
+    if (!userStr) return () => {};
+    
+    const localUser = JSON.parse(userStr);
+    const userId = localUser.id;
+    if (!userId) return () => {};
+
+    const db = getDatabase(app);
+    const userRef = ref(db, `users/${userId}`);
+
+    onValue(userRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const dbUser = snapshot.val();
+        
+        // Combine and sync local and DB user data
+        const mergedUser = { ...localUser, ...dbUser };
+        localStorage.setItem('currentUser', JSON.stringify(mergedUser));
+
+        const transactionHistory = dbUser.transactionHistory ? Object.values(dbUser.transactionHistory).reverse() : [];
+        const betHistory = dbUser.betHistory ? Object.values(dbUser.betHistory).reverse() : [];
+        
         setCurrentUser({
-            name: parsedUser.name || 'User',
-            email: parsedUser.email,
-            avatar: parsedUser.avatar || `https://placehold.co/100x100.png?text=${(parsedUser.name || 'U').charAt(0).toUpperCase()}`,
-            avatarFallback: (parsedUser.name || 'U').charAt(0).toUpperCase(),
-            transactionHistory: parsedUser.transactionHistory || [],
-            betHistory: parsedUser.betHistory || [],
+            ...mergedUser,
+            avatar: mergedUser.avatar || `https://placehold.co/100x100.png?text=${(mergedUser.name || 'U').charAt(0).toUpperCase()}`,
+            avatarFallback: (mergedUser.name || 'U').charAt(0).toUpperCase(),
+            transactionHistory,
+            betHistory,
         });
-    }
+      }
+    });
+
      const savedSettings = localStorage.getItem('adminSettings');
      if (savedSettings) {
          const settings = JSON.parse(savedSettings);
@@ -99,20 +120,17 @@ export function Sidebar({
              supportInfo: settings.supportInfo || 'No support info defined yet.',
          })
      }
-  };
+
+     return () => off(userRef);
+  }, []);
 
   useEffect(() => {
+    let unsubscribe = () => {};
     if (isOpen) {
-        updateSidebarData();
+      unsubscribe = updateSidebarData();
     }
-    const storageHandler = () => {
-      if (isOpen) {
-        updateSidebarData();
-      }
-    };
-    window.addEventListener('storage', storageHandler);
-    return () => window.removeEventListener('storage', storageHandler);
-  }, [isOpen]);
+    return () => unsubscribe();
+  }, [isOpen, updateSidebarData]);
 
   const handleLogout = () => {
     localStorage.removeItem('currentUser');
@@ -143,7 +161,6 @@ export function Sidebar({
   const handleMenuClick = (modal: string) => {
     onOpenChange(false);
     setTimeout(() => {
-        updateSidebarData(); // Ensure data is fresh before opening modal
         setActiveModal(modal);
     }, 200);
   }
@@ -162,11 +179,22 @@ export function Sidebar({
     const userStr = localStorage.getItem('currentUser');
     if(!userStr) return;
     const user = JSON.parse(userStr);
-    user.name = tempUsername;
-    localStorage.setItem('currentUser', JSON.stringify(user));
-    setCurrentUser(prev => ({...prev, name: tempUsername}));
-    toast({title: "Profile Updated!", description: "Your username has been changed."});
-    setIsEditingProfile(false);
+    const userId = user.id;
+
+    const updates = { name: tempUsername };
+    const db = getDatabase(app);
+    update(ref(db, `users/${userId}`), updates)
+      .then(() => {
+        const updatedUser = { ...user, ...updates };
+        localStorage.setItem('currentUser', JSON.stringify(updatedUser));
+        setCurrentUser(prev => ({...prev, name: tempUsername}));
+        toast({title: "Profile Updated!", description: "Your username has been changed."});
+        setIsEditingProfile(false);
+      })
+      .catch(error => {
+        console.error("Profile update failed:", error);
+        toast({variant: 'destructive', title: "Update Failed", description: "Could not update your profile."});
+      });
   }
 
   const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -178,10 +206,21 @@ export function Sidebar({
               const userStr = localStorage.getItem('currentUser');
               if(!userStr) return;
               const user = JSON.parse(userStr);
-              user.avatar = newAvatar;
-              localStorage.setItem('currentUser', JSON.stringify(user));
-              setCurrentUser(prev => ({...prev, avatar: newAvatar}));
-              toast({title: "Avatar Updated!", description: "Your new avatar has been set."});
+              const userId = user.id;
+              
+              const updates = { avatar: newAvatar };
+              const db = getDatabase(app);
+              update(ref(db, `users/${userId}`), updates)
+                .then(() => {
+                  const updatedUser = { ...user, ...updates };
+                  localStorage.setItem('currentUser', JSON.stringify(updatedUser));
+                  setCurrentUser(prev => ({...prev, avatar: newAvatar}));
+                  toast({title: "Avatar Updated!", description: "Your new avatar has been set."});
+                })
+                .catch(error => {
+                  console.error("Avatar update failed:", error);
+                  toast({variant: 'destructive', title: "Update Failed", description: "Could not update your avatar."});
+                });
           };
           reader.readAsDataURL(file);
       }
@@ -288,8 +327,8 @@ export function Sidebar({
                     </TableRow>
                 </TableHeader>
                 <TableBody>
-                    {currentUser.transactionHistory.length > 0 ? currentUser.transactionHistory.map((tx: any) => (
-                        <TableRow key={tx.id}>
+                    {currentUser.transactionHistory && currentUser.transactionHistory.length > 0 ? currentUser.transactionHistory.map((tx: any, index: number) => (
+                        <TableRow key={index}>
                             <TableCell className="text-xs">{tx.date}</TableCell>
                             <TableCell>{tx.type}</TableCell>
                             <TableCell className={`font-bold ${tx.amount > 0 ? 'text-green-400' : 'text-red-400'}`}>
@@ -319,8 +358,8 @@ export function Sidebar({
                     </TableRow>
                 </TableHeader>
                 <TableBody>
-                    {currentUser.betHistory.length > 0 ? currentUser.betHistory.map((bet: any) => (
-                        <TableRow key={bet.id}>
+                    {currentUser.betHistory && currentUser.betHistory.length > 0 ? currentUser.betHistory.map((bet: any, index: number) => (
+                        <TableRow key={index}>
                             <TableCell className="text-xs">{bet.date}</TableCell>
                             <TableCell>₹{bet.bet.toFixed(2)}</TableCell>
                             <TableCell>{bet.cashout ? `${bet.cashout.toFixed(2)}x` : '-'}</TableCell>
