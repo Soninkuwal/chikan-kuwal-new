@@ -60,6 +60,44 @@ export default function Home() {
     }
   }, [betAmount, isAuthenticated]);
 
+  const updateUser = (updateFn: (user: any) => any) => {
+    const currentUserStr = localStorage.getItem('currentUser');
+    if (!currentUserStr) return;
+    let user = JSON.parse(currentUserStr);
+    user = updateFn(user);
+    localStorage.setItem('currentUser', JSON.stringify(user));
+    window.dispatchEvent(new StorageEvent('storage', { key: 'currentUser' }));
+    updateWallet();
+  };
+
+  const addTransaction = (type: 'Bet' | 'Win' | 'Deposit' | 'Withdrawal', amount: number, status: 'Completed' | 'Pending' | 'Failed' = 'Completed') => {
+    const newTransaction = {
+        id: `TX${Date.now()}`,
+        date: new Date().toLocaleString(),
+        type,
+        amount,
+        status,
+    };
+    updateUser(user => ({
+        ...user,
+        transactionHistory: [newTransaction, ...(user.transactionHistory || [])],
+    }));
+  };
+
+  const addBetHistory = (result: 'Win' | 'Loss', bet: number, cashout: number | null, winnings: number) => {
+    const newBet = {
+        id: `BH${Date.now()}`,
+        date: new Date().toLocaleString(),
+        bet,
+        cashout,
+        winnings,
+        result,
+    };
+     updateUser(user => ({
+        ...user,
+        betHistory: [newBet, ...(user.betHistory || [])],
+    }));
+  };
 
   const handlePlay = () => {
     if (gameState === 'running') return;
@@ -73,12 +111,8 @@ export default function Home() {
       return;
     }
 
-    const user = JSON.parse(localStorage.getItem('currentUser')!);
-    const newBalance = user.wallet - betAmount;
-    user.wallet = newBalance;
-    setWalletBalance(newBalance);
-    localStorage.setItem('currentUser', JSON.stringify(user));
-    window.dispatchEvent(new StorageEvent('storage', { key: 'currentUser' }));
+    updateUser(user => ({ ...user, wallet: user.wallet - betAmount }));
+    addTransaction('Bet', -betAmount);
 
     setGameState('running');
     setMultiplier(1.0);
@@ -95,12 +129,9 @@ export default function Home() {
 
     const winnings = betAmount * multiplier;
     
-    const user = JSON.parse(localStorage.getItem('currentUser')!);
-    const newBalance = user.wallet + winnings;
-    user.wallet = newBalance;
-    setWalletBalance(newBalance);
-    localStorage.setItem('currentUser', JSON.stringify(user));
-    window.dispatchEvent(new StorageEvent('storage', { key: 'currentUser' }));
+    updateUser(user => ({ ...user, wallet: user.wallet + winnings }));
+    addTransaction('Win', winnings);
+    addBetHistory('Win', betAmount, parseFloat(multiplier.toFixed(2)), winnings);
 
     if (gameIntervalRef.current) clearInterval(gameIntervalRef.current);
     setGameState('finished');
@@ -119,6 +150,7 @@ export default function Home() {
     setGameState('finished');
 
     if (didCrash) {
+      addBetHistory('Loss', betAmount, null, -betAmount);
       toast({
         variant: "destructive",
         title: "Oh No! You Crashed!",
