@@ -14,27 +14,34 @@ export default function AuthPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [name, setName] = useState('');
-  const [loginEmail, setLoginEmail] = useState('');
+  const [loginIdentifier, setLoginIdentifier] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [signupEmail, setSignupEmail] = useState('');
+  const [signupMobile, setSignupMobile] = useState('');
   const [signupPassword, setSignupPassword] = useState('');
   const [referralCode, setReferralCode] = useState('');
 
   const getInitialUsers = () => {
     if (typeof window === 'undefined') return [];
-    const users = localStorage.getItem('users');
-    return users ? JSON.parse(users) : [
-        { name: 'John Doe', email: 'john@example.com', password: 'password', wallet: 500, avatar: '' },
-        { name: 'Jane Smith', email: 'jane@example.com', password: 'password', wallet: 120, avatar: '' },
-    ];
+    let users = localStorage.getItem('users');
+    if (!users) {
+        const initialUsers = [
+            { name: 'John Doe', email: 'john@example.com', mobile: '9876543210', password: 'password', wallet: 500, avatar: '', transactionHistory: [], betHistory: [] },
+            { name: 'Jane Smith', email: 'jane@example.com', mobile: '9876543211', password: 'password', wallet: 120, avatar: '', transactionHistory: [], betHistory: [] },
+        ];
+        localStorage.setItem('users', JSON.stringify(initialUsers));
+        users = JSON.stringify(initialUsers);
+    }
+    return JSON.parse(users);
   };
 
   const handleSignUp = (e: React.FormEvent) => {
     e.preventDefault();
     const users = getInitialUsers();
-    const userExists = users.some((user: any) => user.email === signupEmail);
+    const emailExists = users.some((user: any) => user.email === signupEmail);
+    const mobileExists = users.some((user: any) => user.mobile === signupMobile);
 
-    if (userExists) {
+    if (emailExists) {
       toast({
         variant: 'destructive',
         title: 'Registration Failed',
@@ -42,8 +49,25 @@ export default function AuthPage() {
       });
       return;
     }
+     if (mobileExists) {
+      toast({
+        variant: 'destructive',
+        title: 'Registration Failed',
+        description: 'A user with this mobile number already exists.',
+      });
+      return;
+    }
 
-    const newUser = { name, email: signupEmail, password: signupPassword, wallet: 300, avatar: '' };
+    const newUser = { 
+        name, 
+        email: signupEmail, 
+        mobile: signupMobile, 
+        password: signupPassword, 
+        wallet: 300, 
+        avatar: '',
+        transactionHistory: [],
+        betHistory: [],
+    };
     const updatedUsers = [...users, newUser];
     localStorage.setItem('users', JSON.stringify(updatedUsers));
     localStorage.setItem('currentUser', JSON.stringify(newUser));
@@ -58,7 +82,10 @@ export default function AuthPage() {
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     const users = getInitialUsers();
-    const user = users.find((user: any) => user.email === loginEmail && user.password === loginPassword);
+    const user = users.find((user: any) => 
+        (user.email === loginIdentifier || user.mobile === loginIdentifier) && 
+        user.password === loginPassword
+    );
 
     if (user) {
       localStorage.setItem('currentUser', JSON.stringify(user));
@@ -71,7 +98,7 @@ export default function AuthPage() {
       toast({
         variant: 'destructive',
         title: 'Login Failed',
-        description: 'Invalid email or password.',
+        description: 'Invalid credentials. Please try again.',
       });
     }
   };
@@ -95,8 +122,8 @@ export default function AuthPage() {
                 <form onSubmit={handleLogin}>
                     <CardContent className="space-y-4">
                         <div className="grid gap-2">
-                            <Label htmlFor="login-email">Email</Label>
-                            <Input id="login-email" type="email" placeholder="user@example.com" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} required />
+                            <Label htmlFor="login-identifier">Email or Mobile Number</Label>
+                            <Input id="login-identifier" type="text" placeholder="your@email.com or Mobile Number" value={loginIdentifier} onChange={(e) => setLoginIdentifier(e.target.value)} required />
                         </div>
                         <div className="grid gap-2">
                             <Label htmlFor="login-password">Password</Label>
@@ -116,6 +143,10 @@ export default function AuthPage() {
                         <div className="grid gap-2">
                             <Label htmlFor="signup-email">Email</Label>
                             <Input id="signup-email" type="email" placeholder="user@example.com" value={signupEmail} onChange={(e) => setSignupEmail(e.target.value)} required />
+                        </div>
+                         <div className="grid gap-2">
+                            <Label htmlFor="signup-mobile">Mobile Number</Label>
+                            <Input id="signup-mobile" type="tel" placeholder="Mobile Number" value={signupMobile} onChange={(e) => setSignupMobile(e.target.value)} required />
                         </div>
                         <div className="grid gap-2">
                             <Label htmlFor="signup-password">Password</Label>
