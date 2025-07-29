@@ -10,6 +10,8 @@ import { useToast } from '@/hooks/use-toast';
 import BottomNavBar from '@/components/game/BottomNavBar';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Skeleton } from '@/components/ui/skeleton';
+import { app } from '@/lib/firebase';
+import { getDatabase, ref, update, push } from 'firebase/database';
 
 export type GameState = 'ready' | 'running' | 'finished';
 const GAME_STEP_INTERVAL = 1000; // ms per step
@@ -17,41 +19,42 @@ const GAME_STEP_INTERVAL = 1000; // ms per step
 export default function Home() {
   const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const [isSidebarOpen, setSidebarOpen] = useState(false);
   const [gameState, setGameState] = useState<GameState>('ready');
   const [betAmount, setBetAmount] = useState<number>(100);
   const [multiplier, setMultiplier] = useState(1.0);
   const [crashPoint, setCrashPoint] = useState<number | null>(null);
-  const [walletBalance, setWalletBalance] = useState<number>(0);
   const [currentStep, setCurrentStep] = useState(0);
 
   const { toast } = useToast();
   const isMobile = useIsMobile();
   const gameIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
-  const updateWallet = () => {
-      const currentUser = localStorage.getItem('currentUser');
-      if(currentUser) {
-          const user = JSON.parse(currentUser);
-          setWalletBalance(user.wallet || 0);
-      }
+  const updateWalletInUI = () => {
+    const userStr = localStorage.getItem('currentUser');
+    if (userStr) {
+      const user = JSON.parse(userStr);
+      setCurrentUser(user);
+    }
   };
 
   useEffect(() => {
-    const currentUser = localStorage.getItem('currentUser');
-    if (!currentUser) {
+    const userStr = localStorage.getItem('currentUser');
+    if (!userStr) {
       router.push('/auth');
     } else {
       setIsAuthenticated(true);
-      updateWallet();
+      setCurrentUser(JSON.parse(userStr));
+      updateWalletInUI();
       const savedBetAmount = localStorage.getItem('betAmount');
       if (savedBetAmount) {
-          setBetAmount(JSON.parse(savedBetAmount));
+        setBetAmount(JSON.parse(savedBetAmount));
       }
     }
     // Listen for changes in local storage from other tabs/windows
-    window.addEventListener('storage', updateWallet);
-    return () => window.removeEventListener('storage', updateWallet);
+    window.addEventListener('storage', updateWalletInUI);
+    return () => window.removeEventListener('storage', updateWalletInUI);
   }, [router]);
 
   useEffect(() => {
@@ -60,58 +63,84 @@ export default function Home() {
     }
   }, [betAmount, isAuthenticated]);
 
-  const updateUser = (updateFn: (user: any) => any) => {
-    const currentUserStr = localStorage.getItem('currentUser');
-    if (!currentUserStr) return;
-    let user = JSON.parse(currentUserStr);
-    user = updateFn(user);
-    localStorage.setItem('currentUser', JSON.stringify(user));
-    window.dispatchEvent(new StorageEvent('storage', { key: 'currentUser' }));
-    updateWallet();
+  const updateUserInDbAndLocal = (updates: any) => {
+    const userStr = localStorage.getItem('currentUser');
+    if (!userStr) return;
+
+    let user = JSON.parse(userStr);
+    const userId = user.id;
+    if (!userId) return;
+
+    // Optimistically update local state and localStorage
+    const updatedUser = { ...user, ...updates };
+    Object.keys(updates).forEach(key => {
+        if (typeof updates[key] === 'object' && updates[key] !== null && !Array.isArray(updates[key])) {
+            updatedUser[key] = {...user[key], ...updates[key]};
+        }
+    });
+
+    localStorage.setItem('currentUser', JSON.stringify(updatedUser));
+    setCurrentUser(updatedUser); // Update React state to trigger re-render
+
+    // Update Firebase
+    const db = getDatabase(app);
+    const userRef = ref(db, `users/${userId}`);
+    update(userRef, updates).catch(error => {
+      console.error("Firebase update failed:", error);
+      // Optional: handle error, maybe revert optimistic update
+    });
   };
 
   const addTransaction = (type: 'Bet' | 'Win' | 'Deposit' | 'Withdrawal', amount: number, status: 'Completed' | 'Pending' | 'Failed' = 'Completed') => {
     const newTransaction = {
-        id: `TX${Date.now()}`,
         date: new Date().toLocaleString(),
         type,
         amount,
         status,
     };
-    updateUser(user => ({
-        ...user,
-        transactionHistory: [newTransaction, ...(user.transactionHistory || [])],
-    }));
+    const db = getDatabase(app);
+    const userStr = localStorage.getItem('currentUser');
+    if (!userStr) return;
+    const user = JSON.parse(userStr);
+    const userId = user.id;
+    if (!userId) return;
+
+    const transactionRef = push(ref(db, `users/${userId}/transactionHistory`));
+    set(transactionRef, newTransaction);
   };
 
   const addBetHistory = (result: 'Win' | 'Loss', bet: number, cashout: number | null, winnings: number) => {
     const newBet = {
-        id: `BH${Date.now()}`,
         date: new Date().toLocaleString(),
         bet,
         cashout,
         winnings,
         result,
     };
-     updateUser(user => ({
-        ...user,
-        betHistory: [newBet, ...(user.betHistory || [])],
-    }));
+    const db = getDatabase(app);
+    const userStr = localStorage.getItem('currentUser');
+    if (!userStr) return;
+    const user = JSON.parse(userStr);
+    const userId = user.id;
+    if (!userId) return;
+
+    const betRef = push(ref(db, `users/${userId}/betHistory`));
+    set(betRef, newBet);
   };
 
   const handlePlay = () => {
-    if (gameState === 'running') return;
+    if (gameState === 'running' || !currentUser) return;
 
-    if (walletBalance < betAmount) {
+    if (currentUser.wallet < betAmount) {
       toast({
         variant: "destructive",
         title: "Insufficient Funds",
-        description: `You do not have enough money (₹${walletBalance.toFixed(2)}) to place a bet of ₹${betAmount}.`,
+        description: `You do not have enough money (₹${currentUser.wallet.toFixed(2)}) to place a bet of ₹${betAmount}.`,
       })
       return;
     }
 
-    updateUser(user => ({ ...user, wallet: user.wallet - betAmount }));
+    updateUserInDbAndLocal({ wallet: currentUser.wallet - betAmount });
     addTransaction('Bet', -betAmount);
 
     setGameState('running');
@@ -123,13 +152,13 @@ export default function Home() {
   };
 
   const handleCashOut = () => {
-    if (gameState !== 'running' || multiplier <= 1.0) {
+    if (gameState !== 'running' || multiplier <= 1.0 || !currentUser) {
       return;
     }
 
     const winnings = betAmount * multiplier;
     
-    updateUser(user => ({ ...user, wallet: user.wallet + winnings }));
+    updateUserInDbAndLocal({ wallet: currentUser.wallet + winnings });
     addTransaction('Win', winnings);
     addBetHistory('Win', betAmount, parseFloat(multiplier.toFixed(2)), winnings);
 
@@ -187,7 +216,7 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameState, crashPoint]);
 
-  if (!isAuthenticated) {
+  if (!isAuthenticated || !currentUser) {
       return (
         <div className="flex h-screen w-full flex-col items-center justify-center bg-background p-4">
             <div className="space-y-4 w-full max-w-lg">
@@ -201,7 +230,7 @@ export default function Home() {
 
   return (
     <div className="relative flex h-screen w-full flex-col overflow-hidden bg-background font-body">
-      <GameHeader onMenuClick={() => setSidebarOpen(true)} walletBalance={walletBalance} />
+      <GameHeader onMenuClick={() => setSidebarOpen(true)} walletBalance={currentUser.wallet} />
       <div className="relative flex-1 pb-40 md:pb-0">
         <GameScene 
           gameState={gameState} 
@@ -221,7 +250,7 @@ export default function Home() {
       <Sidebar 
         isOpen={isSidebarOpen} 
         onOpenChange={setSidebarOpen} 
-        walletBalance={walletBalance}
+        walletBalance={currentUser.wallet}
       />
       {isMobile && <BottomNavBar onMenuClick={() => setSidebarOpen(true)} />}
     </div>
