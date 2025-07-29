@@ -9,6 +9,8 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ShieldCheck } from 'lucide-react';
+import { app } from '@/lib/firebase';
+import { getDatabase, ref, set, get, query, orderByChild, equalTo, push, child } from "firebase/database";
 
 export default function AuthPage() {
   const router = useRouter();
@@ -20,88 +22,85 @@ export default function AuthPage() {
   const [signupMobile, setSignupMobile] = useState('');
   const [signupPassword, setSignupPassword] = useState('');
   const [referralCode, setReferralCode] = useState('');
+  const db = getDatabase(app);
 
-  const getInitialUsers = () => {
-    if (typeof window === 'undefined') return [];
-    let users = localStorage.getItem('users');
-    if (!users) {
-        const initialUsers = [
-            { name: 'John Doe', email: 'john@example.com', mobile: '9876543210', password: 'password', wallet: 500, avatar: '', transactionHistory: [], betHistory: [] },
-            { name: 'Jane Smith', email: 'jane@example.com', mobile: '9876543211', password: 'password', wallet: 120, avatar: '', transactionHistory: [], betHistory: [] },
-        ];
-        localStorage.setItem('users', JSON.stringify(initialUsers));
-        users = JSON.stringify(initialUsers);
-    }
-    return JSON.parse(users);
-  };
-
-  const handleSignUp = (e: React.FormEvent) => {
+  const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
-    const users = getInitialUsers();
-    const emailExists = users.some((user: any) => user.email === signupEmail);
-    const mobileExists = users.some((user: any) => user.mobile === signupMobile);
-
-    if (emailExists) {
-      toast({
-        variant: 'destructive',
-        title: 'Registration Failed',
-        description: 'A user with this email already exists.',
-      });
-      return;
-    }
-     if (mobileExists) {
-      toast({
-        variant: 'destructive',
-        title: 'Registration Failed',
-        description: 'A user with this mobile number already exists.',
-      });
-      return;
+    if (!name || !signupEmail || !signupMobile || !signupPassword) {
+        toast({ variant: 'destructive', title: 'Registration Failed', description: 'Please fill all required fields.' });
+        return;
     }
 
-    const newUser = { 
-        name, 
-        email: signupEmail, 
-        mobile: signupMobile, 
-        password: signupPassword, 
-        wallet: 300, 
-        avatar: '',
-        transactionHistory: [],
-        betHistory: [],
-    };
-    const updatedUsers = [...users, newUser];
-    localStorage.setItem('users', JSON.stringify(updatedUsers));
-    localStorage.setItem('currentUser', JSON.stringify(newUser));
+    try {
+        const usersRef = ref(db, 'users');
+        const newUserRef = push(usersRef);
+        
+        const newUser = { 
+            id: newUserRef.key,
+            name, 
+            email: signupEmail, 
+            mobile: signupMobile, 
+            password: signupPassword, // In a real app, this should be hashed.
+            wallet: 300, 
+            avatar: '',
+            transactionHistory: {},
+            betHistory: {},
+            createdAt: new Date().toISOString(),
+        };
 
-    toast({
-      title: 'Registration Successful',
-      description: 'Welcome! You have been logged in.',
-    });
-    router.push('/');
+        await set(newUserRef, newUser);
+        
+        localStorage.setItem('currentUser', JSON.stringify(newUser));
+
+        toast({ title: 'Registration Successful', description: 'Welcome! You have been logged in.' });
+        router.push('/');
+
+    } catch (error: any) {
+        console.error("Sign up error:", error);
+        toast({ variant: 'destructive', title: 'Registration Error', description: error.message || 'An error occurred. Please ensure your database permissions are set correctly.' });
+    }
   };
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const users = getInitialUsers();
-    const user = users.find((user: any) => 
-        (user.email === loginIdentifier || user.mobile === loginIdentifier) && 
-        user.password === loginPassword
-    );
+    if (!loginIdentifier || !loginPassword) {
+        toast({ variant: 'destructive', title: 'Login Failed', description: 'Please enter your credentials.' });
+        return;
+    }
 
-    if (user) {
-      localStorage.setItem('currentUser', JSON.stringify(user));
-      toast({
-        title: 'Login Successful',
-        description: 'Welcome back!',
-      });
-      router.push('/');
-    } else {
-      toast({
-        variant: 'destructive',
-        title: 'Login Failed',
-        description: 'Invalid credentials. Please try again.',
-      });
+    try {
+        const dbRef = ref(db, 'users');
+        const isEmail = loginIdentifier.includes('@');
+        const userQuery = isEmail 
+            ? query(dbRef, orderByChild('email'), equalTo(loginIdentifier))
+            : query(dbRef, orderByChild('mobile'), equalTo(loginIdentifier));
+        
+        const snapshot = await get(userQuery);
+
+        if (snapshot.exists()) {
+            let user: any = null;
+            let userId = '';
+            snapshot.forEach((childSnapshot) => {
+                userId = childSnapshot.key;
+                user = childSnapshot.val();
+            });
+
+            if (user && user.password === loginPassword) {
+                localStorage.setItem('currentUser', JSON.stringify(user));
+                toast({ title: 'Login Successful', description: 'Welcome back!' });
+                router.push('/');
+            } else {
+                toast({ variant: 'destructive', title: 'Login Failed', description: 'Invalid credentials. Please try again.' });
+            }
+        } else {
+            toast({ variant: 'destructive', title: 'Login Failed', description: 'User not found.' });
+        }
+    } catch (error: any) {
+        console.error("Login error:", error);
+        toast({ variant: 'destructive', title: 'Login Error', description: error.message || 'An error occurred. Please ensure database permissions are set correctly.' });
     }
   };
+
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/40 p-4">
