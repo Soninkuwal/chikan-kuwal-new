@@ -128,7 +128,7 @@ export function Sidebar({
   ];
   
   const authItems = [
-      { icon: LogIn, label: 'Admin Login', href: '/admin/login' },
+      { icon: LogIn, label: 'Admin Login', href: '/login' },
       { icon: Crown, label: 'Owner Login', href: '/owner/login' },
   ]
 
@@ -370,5 +370,3 @@ export function Sidebar({
     </>
   );
 }
-
-    
