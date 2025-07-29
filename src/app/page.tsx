@@ -11,9 +11,10 @@ import BottomNavBar from '@/components/game/BottomNavBar';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Skeleton } from '@/components/ui/skeleton';
 import { app } from '@/lib/firebase';
-import { getDatabase, ref, update, push } from 'firebase/database';
+import { getDatabase, ref, update, push, set, get, child } from 'firebase/database';
 
 export type GameState = 'ready' | 'running' | 'finished';
+export type Difficulty = 'easy' | 'medium' | 'hard';
 const GAME_STEP_INTERVAL = 1000; // ms per step
 
 export default function Home() {
@@ -23,6 +24,7 @@ export default function Home() {
   const [isSidebarOpen, setSidebarOpen] = useState(false);
   const [gameState, setGameState] = useState<GameState>('ready');
   const [betAmount, setBetAmount] = useState<number>(100);
+  const [difficulty, setDifficulty] = useState<Difficulty>('easy');
   const [multiplier, setMultiplier] = useState(1.0);
   const [crashPoint, setCrashPoint] = useState<number | null>(null);
   const [currentStep, setCurrentStep] = useState(0);
@@ -51,6 +53,10 @@ export default function Home() {
       if (savedBetAmount) {
         setBetAmount(JSON.parse(savedBetAmount));
       }
+       const savedDifficulty = localStorage.getItem('difficulty');
+        if (savedDifficulty) {
+            setDifficulty(JSON.parse(savedDifficulty));
+        }
     }
     // Listen for changes in local storage from other tabs/windows
     window.addEventListener('storage', updateWalletInUI);
@@ -60,8 +66,9 @@ export default function Home() {
   useEffect(() => {
     if (isAuthenticated) {
         localStorage.setItem('betAmount', JSON.stringify(betAmount));
+        localStorage.setItem('difficulty', JSON.stringify(difficulty));
     }
-  }, [betAmount, isAuthenticated]);
+  }, [betAmount, difficulty, isAuthenticated]);
 
   const updateUserInDbAndLocal = (updates: any) => {
     const userStr = localStorage.getItem('currentUser');
@@ -92,38 +99,40 @@ export default function Home() {
   };
 
   const addTransaction = (type: 'Bet' | 'Win' | 'Deposit' | 'Withdrawal', amount: number, status: 'Completed' | 'Pending' | 'Failed' = 'Completed') => {
-    const newTransaction = {
-        date: new Date().toLocaleString(),
-        type,
-        amount,
-        status,
-    };
-    const db = getDatabase(app);
     const userStr = localStorage.getItem('currentUser');
     if (!userStr) return;
     const user = JSON.parse(userStr);
     const userId = user.id;
     if (!userId) return;
-
+    
+    const newTransaction = {
+        date: new Date().toISOString(),
+        type,
+        amount,
+        status,
+    };
+    
+    const db = getDatabase(app);
     const transactionRef = push(ref(db, `users/${userId}/transactionHistory`));
     set(transactionRef, newTransaction);
   };
 
   const addBetHistory = (result: 'Win' | 'Loss', bet: number, cashout: number | null, winnings: number) => {
-    const newBet = {
-        date: new Date().toLocaleString(),
-        bet,
-        cashout,
-        winnings,
-        result,
-    };
-    const db = getDatabase(app);
     const userStr = localStorage.getItem('currentUser');
     if (!userStr) return;
     const user = JSON.parse(userStr);
     const userId = user.id;
     if (!userId) return;
 
+    const newBet = {
+        date: new Date().toISOString(),
+        bet,
+        cashout,
+        winnings,
+        result,
+    };
+    
+    const db = getDatabase(app);
     const betRef = push(ref(db, `users/${userId}/betHistory`));
     set(betRef, newBet);
   };
@@ -141,13 +150,31 @@ export default function Home() {
     }
 
     updateUserInDbAndLocal({ wallet: currentUser.wallet - betAmount });
-    addTransaction('Bet', -betAmount);
+    addTransaction('Bet', -betAmount, 'Completed');
 
     setGameState('running');
     setMultiplier(1.0);
     setCurrentStep(0);
-    // Crash point between 1.1x and 10.0x
-    const randomCrashPoint = 1.1 + Math.random() * 8.9;
+    
+    const savedSettings = JSON.parse(localStorage.getItem('adminSettings') || '{}');
+    let min = 1.01, max = 2.00;
+
+    switch(difficulty) {
+        case 'easy':
+            min = parseFloat(savedSettings.difficultyEasyMin || 1.01);
+            max = parseFloat(savedSettings.difficultyEasyMax || 2.00);
+            break;
+        case 'medium':
+            min = parseFloat(savedSettings.difficultyMediumMin || 1.50);
+            max = parseFloat(savedSettings.difficultyMediumMax || 5.00);
+            break;
+        case 'hard':
+            min = parseFloat(savedSettings.difficultyHardMin || 2.00);
+            max = parseFloat(savedSettings.difficultyHardMax || 10.00);
+            break;
+    }
+
+    const randomCrashPoint = Math.random() * (max - min) + min;
     setCrashPoint(randomCrashPoint);
   };
 
@@ -159,7 +186,7 @@ export default function Home() {
     const winnings = betAmount * multiplier;
     
     updateUserInDbAndLocal({ wallet: currentUser.wallet + winnings });
-    addTransaction('Win', winnings);
+    addTransaction('Win', winnings, 'Completed');
     addBetHistory('Win', betAmount, parseFloat(multiplier.toFixed(2)), winnings);
 
     if (gameIntervalRef.current) clearInterval(gameIntervalRef.current);
@@ -245,6 +272,8 @@ export default function Home() {
             betAmount={betAmount}
             onBetAmountChange={setBetAmount}
             multiplier={multiplier}
+            difficulty={difficulty}
+            onDifficultyChange={setDifficulty}
         />
       </div>
       <Sidebar 
@@ -256,3 +285,5 @@ export default function Home() {
     </div>
   );
 }
+
+    
