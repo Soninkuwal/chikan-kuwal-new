@@ -39,6 +39,8 @@ import { ChatInterface } from './ChatInterface';
 import { Label } from '../ui/label';
 import { Input } from '../ui/input';
 import { useToast } from '@/hooks/use-toast';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
+import { Badge } from '../ui/badge';
 
 type SidebarProps = {
   isOpen: boolean;
@@ -53,7 +55,6 @@ const ownerChatInitialMessages = [
      { id: 1, sender: 'Support' as const, name: 'Owner', avatar: 'O', text: 'Welcome! How may I assist you?', timestamp: '11:00 AM' },
 ];
 
-
 export function Sidebar({ 
   isOpen, 
   onOpenChange,
@@ -63,7 +64,7 @@ export function Sidebar({
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [chatTarget, setChatTarget] = useState<'admin' | 'owner' | null>(null);
   const { toast } = useToast();
-  const [currentUser, setCurrentUser] = useState({ name: 'User', email: 'user@example.com', avatar: 'https://placehold.co/100x100.png', avatarFallback: 'U' });
+  const [currentUser, setCurrentUser] = useState({ name: 'User', email: 'user@example.com', avatar: 'https://placehold.co/100x100.png', avatarFallback: 'U', transactionHistory: [], betHistory: [] });
   const [tempUsername, setTempUsername] = useState(currentUser.name);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
 
@@ -84,6 +85,8 @@ export function Sidebar({
             email: parsedUser.email,
             avatar: parsedUser.avatar || `https://placehold.co/100x100.png?text=${(parsedUser.name || 'U').charAt(0).toUpperCase()}`,
             avatarFallback: (parsedUser.name || 'U').charAt(0).toUpperCase(),
+            transactionHistory: parsedUser.transactionHistory || [],
+            betHistory: parsedUser.betHistory || [],
         });
     }
      const savedSettings = localStorage.getItem('adminSettings');
@@ -102,8 +105,13 @@ export function Sidebar({
     if (isOpen) {
         updateSidebarData();
     }
-    window.addEventListener('storage', updateSidebarData);
-    return () => window.removeEventListener('storage', updateSidebarData);
+    const storageHandler = () => {
+      if (isOpen) {
+        updateSidebarData();
+      }
+    };
+    window.addEventListener('storage', storageHandler);
+    return () => window.removeEventListener('storage', storageHandler);
   }, [isOpen]);
 
   const handleLogout = () => {
@@ -134,7 +142,10 @@ export function Sidebar({
 
   const handleMenuClick = (modal: string) => {
     onOpenChange(false);
-    setTimeout(() => setActiveModal(modal), 200);
+    setTimeout(() => {
+        updateSidebarData(); // Ensure data is fresh before opening modal
+        setActiveModal(modal);
+    }, 200);
   }
 
   const handleChatClick = () => {
@@ -148,7 +159,9 @@ export function Sidebar({
   }
 
   const handleSaveProfile = () => {
-    const user = JSON.parse(localStorage.getItem('currentUser')!);
+    const userStr = localStorage.getItem('currentUser');
+    if(!userStr) return;
+    const user = JSON.parse(userStr);
     user.name = tempUsername;
     localStorage.setItem('currentUser', JSON.stringify(user));
     setCurrentUser(prev => ({...prev, name: tempUsername}));
@@ -162,7 +175,9 @@ export function Sidebar({
           const reader = new FileReader();
           reader.onloadend = () => {
               const newAvatar = reader.result as string;
-              const user = JSON.parse(localStorage.getItem('currentUser')!);
+              const userStr = localStorage.getItem('currentUser');
+              if(!userStr) return;
+              const user = JSON.parse(userStr);
               user.avatar = newAvatar;
               localStorage.setItem('currentUser', JSON.stringify(user));
               setCurrentUser(prev => ({...prev, avatar: newAvatar}));
@@ -262,9 +277,63 @@ export function Sidebar({
             </div>
         );
       case 'transaction_history':
-        return <p>Your transaction history will appear here. This includes all deposits, withdrawals, bets, and winnings.</p>;
+        return (
+            <Table>
+                <TableHeader>
+                    <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Amount</TableHead>
+                        <TableHead>Status</TableHead>
+                    </TableRow>
+                </TableHeader>
+                <TableBody>
+                    {currentUser.transactionHistory.length > 0 ? currentUser.transactionHistory.map((tx: any) => (
+                        <TableRow key={tx.id}>
+                            <TableCell className="text-xs">{tx.date}</TableCell>
+                            <TableCell>{tx.type}</TableCell>
+                            <TableCell className={`font-bold ${tx.amount > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                ₹{Math.abs(tx.amount).toFixed(2)}
+                            </TableCell>
+                            <TableCell>
+                                <Badge variant={tx.status === 'Completed' ? 'default' : tx.status === 'Pending' ? 'secondary' : 'destructive'}>
+                                    {tx.status}
+                                </Badge>
+                            </TableCell>
+                        </TableRow>
+                    )) : (
+                        <TableRow><TableCell colSpan={4} className="text-center">No transactions yet.</TableCell></TableRow>
+                    )}
+                </TableBody>
+            </Table>
+        );
       case 'bet_history':
-        return <p>Your bet history will appear here, showing a log of all the rounds you've played.</p>;
+        return (
+            <Table>
+                <TableHeader>
+                    <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Bet</TableHead>
+                        <TableHead>Cashed Out</TableHead>
+                        <TableHead>Winnings</TableHead>
+                    </TableRow>
+                </TableHeader>
+                <TableBody>
+                    {currentUser.betHistory.length > 0 ? currentUser.betHistory.map((bet: any) => (
+                        <TableRow key={bet.id}>
+                            <TableCell className="text-xs">{bet.date}</TableCell>
+                            <TableCell>₹{bet.bet.toFixed(2)}</TableCell>
+                            <TableCell>{bet.cashout ? `${bet.cashout.toFixed(2)}x` : '-'}</TableCell>
+                             <TableCell className={`font-bold ${bet.result === 'Win' ? 'text-green-400' : 'text-red-400'}`}>
+                                {bet.result === 'Win' ? `+₹${bet.winnings.toFixed(2)}` : `-₹${Math.abs(bet.winnings).toFixed(2)}`}
+                            </TableCell>
+                        </TableRow>
+                    )) : (
+                         <TableRow><TableCell colSpan={4} className="text-center">No bets placed yet.</TableCell></TableRow>
+                    )}
+                </TableBody>
+            </Table>
+        );
       default:
         return <p>Content for {activeModal?.replace(/_/g, ' ')} goes here.</p>;
     }
