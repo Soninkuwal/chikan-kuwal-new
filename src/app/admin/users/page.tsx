@@ -1,3 +1,4 @@
+
 'use client'
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -5,7 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { MoreHorizontal } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,24 +17,46 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { app } from "@/lib/firebase"
+import { getDatabase, ref, onValue } from "firebase/database"
 
-const initialUsers = [
-    { id: 1, name: 'John Doe', email: 'john@example.com', status: 'Active', role: 'Player', wallet: 500 },
-    { id: 2, name: 'Jane Smith', email: 'jane@example.com', status: 'Banned', role: 'Player', wallet: 120 },
-    { id: 3, name: 'Admin User', email: 'admin@example.com', status: 'Active', role: 'Admin', wallet: 0 },
-]
-
-type User = typeof initialUsers[0];
+type User = {
+    id: string;
+    name: string;
+    email: string;
+    status: 'Active' | 'Banned';
+    role: 'Player' | 'Admin' | 'Owner';
+    wallet: number;
+};
 
 export default function UsersPage() {
-  const [users, setUsers] = useState(initialUsers);
+  const [users, setUsers] = useState<User[]>([]);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
-  const handleDelete = (userId: number) => {
+  useEffect(() => {
+    const db = getDatabase(app);
+    const usersRef = ref(db, 'users');
+    onValue(usersRef, (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            const userList = Object.keys(data).map(key => ({
+                id: key,
+                ...data[key],
+                role: data[key].role || 'Player' // Default role
+            }));
+            setUsers(userList);
+        }
+    });
+  }, []);
+
+  const handleDelete = (userId: string) => {
+    // In a real app, you would update the database to delete the user.
+    // For this example, we'll just filter them out of the UI.
     setUsers(users.filter(user => user.id !== userId));
   };
 
-  const handleSuspend = (userId: number) => {
+  const handleSuspend = (userId: string) => {
+      // In a real app, you'd update the user's status in the database.
       setUsers(users.map(user => user.id === userId ? {...user, status: user.status === 'Active' ? 'Banned' : 'Active'} : user));
       setSelectedUser(null);
   }
