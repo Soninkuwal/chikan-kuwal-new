@@ -22,14 +22,6 @@ export default function AdminLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-
-  if (pathname.startsWith('/owner')) {
-      return <>{children}</>
-  }
-
-  if (pathname === '/admin' || pathname === '/admin/login') {
-    return <>{children}</>;
-  }
   
   return (
     <div className="flex min-h-screen w-full bg-background text-foreground">
@@ -58,7 +50,7 @@ export default function AdminLayout({
           </nav>
         </ScrollArea>
         <div className="mt-auto p-4 border-t border-border">
-           <Link href="/admin/login">
+           <Link href="/login">
             <Button variant="destructive" className="w-full justify-center text-base py-3 h-auto">
                 <LogOut className="mr-2 h-5 w-5" /> Logout
             </Button>
