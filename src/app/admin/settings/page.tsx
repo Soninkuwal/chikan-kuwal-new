@@ -26,6 +26,7 @@ const defaultSettings = {
     siteVersion: '1.0',
     poweredBy: 'yaar tera badmas hai jaanu',
     maintenanceMode: false,
+    withdrawalGate: false,
     gameRules: '1. All players must be over 18 years of age.\n2. Bets can only be placed before the round starts.\n3. Winnings are calculated by multiplying the bet amount by the multiplier at the time of cash-out.\n4. If the game crashes before you cash out, the bet is lost.',
     howToPlay: '1. Select your bet amount.\n2. Choose the game difficulty.\n3. Click "Play" to start the game.\n4. Watch the multiplier increase.\n5. Click "Cash Out" before the game crashes to win.',
     supportInfo: 'For any support queries, please contact us at support@example.com or join our Telegram channel.',
@@ -99,6 +100,10 @@ export default function SettingsPage() {
                             <Input id="maxDeposit" value={settings.maxDeposit} onChange={handleInputChange} type="number" />
                         </div>
                     </div>
+                    <div className="flex items-center space-x-2 pt-2">
+                        <Switch id="withdrawalGate" checked={settings.withdrawalGate} onCheckedChange={(c) => handleSwitchChange(c, 'withdrawalGate')} />
+                        <Label htmlFor="withdrawalGate">Enable Withdrawal Gate (Require ₹2000 Deposit)</Label>
+                    </div>
                 </CardContent>
             </Card>
              <Card>
@@ -108,12 +113,10 @@ export default function SettingsPage() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <div className="space-y-2 sm:col-span-3">
-                            <div className="hidden sm:grid grid-cols-3 gap-4">
-                                <Label>Level</Label>
-                                <Label>Min Multiplier</Label>
-                                <Label>Max Multiplier</Label>
-                            </div>
+                        <div className="hidden sm:grid grid-cols-3 gap-4">
+                            <Label>Level</Label>
+                            <Label>Min Multiplier</Label>
+                            <Label>Max Multiplier</Label>
                         </div>
                     </div>
                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
@@ -192,5 +195,3 @@ export default function SettingsPage() {
     </div>
   )
 }
-
-    
