@@ -23,23 +23,33 @@ const BUTTERFLY_COUNT = 10;
 const CLOUD_COUNT = 7;
 const CARD_WIDTH_REM = 6;
 const CARD_GAP_REM = 4;
+const CHICKEN_POSITION_LEFT = '20%';
 
 export default function GameScene({ gameState, currentStep }: GameSceneProps) {
   const gatesRef = useRef<HTMLDivElement>(null);
+  const chickenRef = useRef<HTMLDivElement>(null);
+  const [remInPixels, setRemInPixels] = useState(16);
+
+  useEffect(() => {
+    setRemInPixels(parseFloat(getComputedStyle(document.documentElement).fontSize));
+  }, []);
 
   useEffect(() => {
     const gatesEl = gatesRef.current;
-    if (!gatesEl) return;
+    const chickenEl = chickenRef.current;
+    if (!gatesEl || !chickenEl) return;
     
     if (gameState === 'running') {
-      const remInPixels = parseFloat(getComputedStyle(document.documentElement).fontSize);
       const stepDistance = (CARD_WIDTH_REM + CARD_GAP_REM) * remInPixels;
+      // The whole scene moves, creating the illusion of the chicken moving forward
       gatesEl.style.transform = `translateX(-${currentStep * stepDistance}px)`;
+      chickenEl.style.transform = `translateX(${currentStep * stepDistance}px) translateY(-60%)`;
     } else {
       // Reset position when game is not running
       gatesEl.style.transform = `translateX(0px)`;
+      chickenEl.style.transform = `translateX(0px) translateY(-60%)`;
     }
-  }, [currentStep, gameState]);
+  }, [currentStep, gameState, remInPixels]);
   
   return (
     <div className={cn("w-full h-full relative road-bg flex flex-col justify-center overflow-hidden", {
@@ -76,11 +86,12 @@ export default function GameScene({ gameState, currentStep }: GameSceneProps) {
         </div>
 
       <div 
+        ref={chickenRef}
         className={cn(
-            'absolute z-10 top-1/2 -translate-y-[60%] transition-transform duration-300',
+            'absolute z-10 top-1/2 -translate-y-[60%] transition-transform duration-1000 ease-linear',
             { 'chicken-bounce': gameState !== 'running' }
         )}
-        style={{ left: '20%', transform: 'translate(-50%, -60%)' }}
+        style={{ left: CHICKEN_POSITION_LEFT, transform: 'translateY(-60%)' }}
       >
         <Image
           src={gameState === 'finished' ? "https://chickenroad.rajmines.com/images/blast.png" : "https://chickenroad.rajmines.com/images/chicken.png"}
