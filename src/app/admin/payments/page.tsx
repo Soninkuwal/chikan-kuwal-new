@@ -18,15 +18,17 @@ import {
 import Image from "next/image";
 import { useToast } from '@/hooks/use-toast';
 import { app } from '@/lib/firebase';
-import { getDatabase, ref, update, get } from "firebase/database";
+import { getDatabase, ref, update, get, onValue, off, remove } from "firebase/database";
 
-const initialDepositRequests = [
-    { id: 'TXN789', userId: 'john@example.com', user: 'Player123', amount: '₹500', utr: '123456789012', screenshot: 'https://placehold.co/600x400.png', date: '2023-10-28 10:00 AM' },
-    { id: 'TXN790', userId: 'jane@example.com', user: 'Lucky7', amount: '₹1000', utr: '987654321098', screenshot: 'https://placehold.co/600x400.png', date: '2023-10-28 11:30 AM' },
-    { id: 'TXN791', userId: 'newuser@example.com', user: 'NewUser24', amount: '₹250', utr: '555566667777', screenshot: 'https://placehold.co/600x400.png', date: '2023-10-29 09:15 AM' },
-];
-
-type DepositRequest = typeof initialDepositRequests[0];
+type DepositRequest = { 
+    id: string;
+    userId: string;
+    user: string;
+    amount: string;
+    utr: string;
+    screenshot: string;
+    date: string;
+};
 
 export default function DepositRequestsPage() {
   const [requests, setRequests] = useState<DepositRequest[]>([]);
@@ -34,33 +36,38 @@ export default function DepositRequestsPage() {
   const { toast } = useToast();
 
   useEffect(() => {
-      const storedRequests = localStorage.getItem('depositRequests');
-      if (storedRequests) {
-          setRequests(JSON.parse(storedRequests));
-      } else {
-          setRequests(initialDepositRequests);
-          localStorage.setItem('depositRequests', JSON.stringify(initialDepositRequests));
-      }
+    const db = getDatabase(app);
+    const requestsRef = ref(db, 'depositRequests');
 
-      const handleStorageChange = (event: StorageEvent) => {
-          if (event.key === 'depositRequests') {
-              const updatedRequests = localStorage.getItem('depositRequests');
-              if (updatedRequests) {
-                  setRequests(JSON.parse(updatedRequests));
-              }
-          }
-      };
-      window.addEventListener('storage', handleStorageChange);
-      return () => window.removeEventListener('storage', handleStorageChange);
+    const listener = onValue(requestsRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        const requestList = Object.keys(data).map(key => ({
+          id: key,
+          ...data[key]
+        }));
+        setRequests(requestList);
+      } else {
+        setRequests([]);
+      }
+    });
+
+    return () => {
+      off(requestsRef, 'value', listener);
+    };
   }, []);
 
   const handleAction = async (request: DepositRequest, status: 'approved' | 'rejected') => {
-    const updatedRequests = requests.filter(req => req.id !== request.id);
-    setRequests(updatedRequests);
-    localStorage.setItem('depositRequests', JSON.stringify(updatedRequests));
+    const db = getDatabase(app);
+    const requestRef = ref(db, `depositRequests/${request.id}`);
+    
+    // Optimistically remove from UI, though Firebase listener will handle it
+    setRequests(prev => prev.filter(req => req.id !== request.id));
+    
+    // Remove the request from the pending list in Firebase
+    await remove(requestRef);
 
     if (status === 'approved') {
-        const db = getDatabase(app);
         const usersRef = ref(db, 'users');
         const snapshot = await get(usersRef);
 
@@ -68,9 +75,8 @@ export default function DepositRequestsPage() {
             let userToUpdate: any = null;
             let userIdToUpdate: string | null = null;
             snapshot.forEach((childSnapshot) => {
-                const user = childSnapshot.val();
-                if (user.email === request.userId) {
-                    userToUpdate = user;
+                if (childSnapshot.val().id === request.userId) {
+                    userToUpdate = childSnapshot.val();
                     userIdToUpdate = childSnapshot.key;
                 }
             });
@@ -79,17 +85,9 @@ export default function DepositRequestsPage() {
                 const newBalance = (userToUpdate.wallet || 0) + parseFloat(request.amount.replace('₹', ''));
                 await update(ref(db, `users/${userIdToUpdate}`), { wallet: newBalance });
                 
-                // Also update currentUser if they are the one being updated
-                const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-                if (currentUser.email === request.userId) {
-                    const updatedCurrentUser = { ...currentUser, wallet: newBalance };
-                    localStorage.setItem('currentUser', JSON.stringify(updatedCurrentUser));
-                    window.dispatchEvent(new StorageEvent('storage', { key: 'currentUser' }));
-                }
-
                 toast({ title: 'Request Approved', description: `${request.user}'s wallet has been updated.`});
             } else {
-                 toast({ variant: 'destructive', title: 'Update Failed', description: `User with email ${request.userId} not found.`});
+                 toast({ variant: 'destructive', title: 'Update Failed', description: `User with ID ${request.userId} not found.`});
             }
         }
     } else {
@@ -121,7 +119,7 @@ export default function DepositRequestsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {requests.map((req) => (
+                {requests.length > 0 ? requests.map((req) => (
                   <TableRow key={req.id}>
                     <TableCell>{req.user}</TableCell>
                     <TableCell className="font-bold">{req.amount}</TableCell>
@@ -139,7 +137,11 @@ export default function DepositRequestsPage() {
                       </Button>
                     </TableCell>
                   </TableRow>
-                ))}
+                )) : (
+                   <TableRow>
+                    <TableCell colSpan={6} className="text-center h-24">No pending deposit requests.</TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </CardContent>
@@ -156,7 +158,7 @@ export default function DepositRequestsPage() {
           </AlertDialogDescription>
           {selectedScreenshot && (
             <div className="relative h-96">
-                <Image src={selectedScreenshot} alt="Deposit Screenshot" layout="fill" objectFit="contain" />
+                <Image src={selectedScreenshot} data-ai-hint="payment receipt" alt="Deposit Screenshot" layout="fill" objectFit="contain" />
             </div>
           )}
           <AlertDialogFooter>
