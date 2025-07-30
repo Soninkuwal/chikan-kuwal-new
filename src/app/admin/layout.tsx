@@ -1,10 +1,11 @@
+
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Home, Users, ArrowDownToDot, ArrowUpFromDot, List, Settings, LogOut, MessageSquare, Bell, User, Crown } from 'lucide-react';
+import { Home, Users, ArrowDownToDot, ArrowUpFromDot, List, Settings, LogOut, MessageSquare, Bell, User, Crown, ShieldCheck } from 'lucide-react';
 
 const menuItems = [
   { href: '/admin/dashboard', label: 'Dashboard', icon: Home },
@@ -12,7 +13,8 @@ const menuItems = [
   { href: '/admin/payments', label: 'Deposit Requests', icon: ArrowDownToDot },
   { href: '/admin/withdrawal-requests', label: 'Withdrawal Requests', icon: ArrowUpFromDot },
   { href: '/admin/transactions', label: 'All Transactions', icon: List },
-   { href: '/admin/chat', label: 'Chat', icon: MessageSquare },
+  { href: '/admin/kyc-requests', label: 'KYC Requests', icon: ShieldCheck },
+  { href: '/admin/chat', label: 'Chat', icon: MessageSquare },
   { href: '/admin/settings', label: 'Settings', icon: Settings },
 ];
 
