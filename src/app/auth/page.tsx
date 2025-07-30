@@ -50,7 +50,7 @@ export default function AuthPage() {
             createdAt: new Date().toISOString(),
             status: 'Active',
             role: 'Player',
-            kycStatus: 'Not Verified', // Default KYC status
+            kycStatus: 'Not Verified',
         };
 
         await set(newUserRef, newUser);
@@ -85,9 +85,8 @@ export default function AuthPage() {
         if (snapshot.exists()) {
             let user: any = null;
             snapshot.forEach((childSnapshot) => {
-                // Since email/mobile should be unique, we take the first match.
                 if (!user) {
-                  user = { id: childSnapshot.key, ...childSnapshot.val() };
+                  user = childSnapshot.val();
                 }
             });
 
