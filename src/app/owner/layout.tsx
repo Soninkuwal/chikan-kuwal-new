@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Crown, LayoutDashboard, Shield, Users, CreditCard, MessageSquare, Settings, Bell, LogOut, ArrowDownToDot, ArrowUpFromDot, List } from 'lucide-react';
+import { Crown, LayoutDashboard, Shield, Users, CreditCard, MessageSquare, Settings, Bell, LogOut, ArrowDownToDot, ArrowUpFromDot, List, ShieldCheck } from 'lucide-react';
 
 const menuItems = [
   { href: '/owner/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -14,6 +14,7 @@ const menuItems = [
   { href: '/owner/payments', label: 'Deposit Requests', icon: ArrowDownToDot },
   { href: '/owner/withdrawal-requests', label: 'Withdrawal Requests', icon: ArrowUpFromDot },
   { href: '/owner/transactions', label: 'All Transactions', icon: List },
+  { href: '/owner/kyc-requests', label: 'KYC Requests', icon: ShieldCheck },
   { href: '/owner/chat', label: 'Chat', icon: MessageSquare },
   { href: '/owner/settings', label: 'Global Settings', icon: Settings },
 ];
