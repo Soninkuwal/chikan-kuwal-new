@@ -17,6 +17,8 @@ import {
 } from "@/components/ui/alert-dialog"
 import Image from "next/image";
 import { useToast } from '@/hooks/use-toast';
+import { app } from '@/lib/firebase';
+import { getDatabase, ref, update, get } from "firebase/database";
 
 const initialDepositRequests = [
     { id: 'TXN789', userId: 'john@example.com', user: 'Player123', amount: '₹500', utr: '123456789012', screenshot: 'https://placehold.co/600x400.png', date: '2023-10-28 10:00 AM' },
@@ -52,29 +54,44 @@ export default function DepositRequestsPage() {
       return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
-  const handleAction = (request: DepositRequest, status: 'approved' | 'rejected') => {
+  const handleAction = async (request: DepositRequest, status: 'approved' | 'rejected') => {
     const updatedRequests = requests.filter(req => req.id !== request.id);
     setRequests(updatedRequests);
     localStorage.setItem('depositRequests', JSON.stringify(updatedRequests));
 
     if (status === 'approved') {
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
-        const updatedUsers = users.map((user: any) => {
-            if (user.email === request.userId) {
-                const updatedUser = { ...user, wallet: (user.wallet || 0) + parseFloat(request.amount.replace('₹', '')) };
+        const db = getDatabase(app);
+        const usersRef = ref(db, 'users');
+        const snapshot = await get(usersRef);
+
+        if (snapshot.exists()) {
+            let userToUpdate: any = null;
+            let userIdToUpdate: string | null = null;
+            snapshot.forEach((childSnapshot) => {
+                const user = childSnapshot.val();
+                if (user.email === request.userId) {
+                    userToUpdate = user;
+                    userIdToUpdate = childSnapshot.key;
+                }
+            });
+
+            if (userToUpdate && userIdToUpdate) {
+                const newBalance = (userToUpdate.wallet || 0) + parseFloat(request.amount.replace('₹', ''));
+                await update(ref(db, `users/${userIdToUpdate}`), { wallet: newBalance });
+                
                 // Also update currentUser if they are the one being updated
                 const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-                if (currentUser.email === user.email) {
-                    localStorage.setItem('currentUser', JSON.stringify(updatedUser));
+                if (currentUser.email === request.userId) {
+                    const updatedCurrentUser = { ...currentUser, wallet: newBalance };
+                    localStorage.setItem('currentUser', JSON.stringify(updatedCurrentUser));
+                    window.dispatchEvent(new StorageEvent('storage', { key: 'currentUser' }));
                 }
-                return updatedUser;
+
+                toast({ title: 'Request Approved', description: `${request.user}'s wallet has been updated.`});
+            } else {
+                 toast({ variant: 'destructive', title: 'Update Failed', description: `User with email ${request.userId} not found.`});
             }
-            return user;
-        });
-        localStorage.setItem('users', JSON.stringify(updatedUsers));
-        window.dispatchEvent(new StorageEvent('storage', { key: 'users' }));
-        window.dispatchEvent(new StorageEvent('storage', { key: 'currentUser' })); // Notify other tabs
-        toast({ title: 'Request Approved', description: `${request.user}'s wallet has been updated.`});
+        }
     } else {
         toast({ variant: 'destructive', title: 'Request Rejected', description: `Deposit request for ${request.user} has been rejected.`});
     }
