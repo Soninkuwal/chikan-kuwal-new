@@ -6,6 +6,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button"
 import { Check, X } from "lucide-react"
 import { useToast } from '@/hooks/use-toast';
+import { app } from '@/lib/firebase';
+import { getDatabase, ref, update, get } from 'firebase/database';
 
 const initialWithdrawalRequests = [
     { id: 'WDR456', userId: 'jane@example.com', user: 'Jane Smith', amount: '₹200', method: 'UPI (jane@upi)', date: '2023-10-26 09:00 AM' },
@@ -40,7 +42,7 @@ export default function OwnerWithdrawalRequestsPage() {
     return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
-  const handleAction = (request: WithdrawalRequest, status: 'approved' | 'rejected') => {
+  const handleAction = async (request: WithdrawalRequest, status: 'approved' | 'rejected') => {
     const updatedRequests = requests.filter(req => req.id !== request.id);
     setRequests(updatedRequests);
     localStorage.setItem('withdrawalRequests', JSON.stringify(updatedRequests));
@@ -48,23 +50,37 @@ export default function OwnerWithdrawalRequestsPage() {
     if (status === 'approved') {
         toast({ title: 'Request Approved', description: `Withdrawal for ${request.user} has been approved.`});
     } else {
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
-        const updatedUsers = users.map((user: any) => {
-            if (user.email === request.userId) {
-                const updatedUser = { ...user, wallet: (user.wallet || 0) + parseFloat(request.amount.replace('₹', '')) };
-                 // Also update currentUser if they are the one being updated
-                const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-                if (currentUser.email === user.email) {
-                    localStorage.setItem('currentUser', JSON.stringify(updatedUser));
+        const db = getDatabase(app);
+        const usersRef = ref(db, 'users');
+        const snapshot = await get(usersRef);
+
+        if (snapshot.exists()) {
+            let userToUpdate: any = null;
+            let userIdToUpdate: string | null = null;
+            snapshot.forEach((childSnapshot) => {
+                const user = childSnapshot.val();
+                if (user.email === request.userId) {
+                    userToUpdate = user;
+                    userIdToUpdate = childSnapshot.key;
                 }
-                return updatedUser;
+            });
+
+            if (userToUpdate && userIdToUpdate) {
+                const newBalance = (userToUpdate.wallet || 0) + parseFloat(request.amount.replace('₹', ''));
+                await update(ref(db, `users/${userIdToUpdate}`), { wallet: newBalance });
+
+                const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+                if (currentUser.email === request.userId) {
+                    const updatedCurrentUser = { ...currentUser, wallet: newBalance };
+                    localStorage.setItem('currentUser', JSON.stringify(updatedCurrentUser));
+                    window.dispatchEvent(new StorageEvent('storage', { key: 'currentUser' }));
+                }
+
+                toast({ variant: 'destructive', title: 'Request Rejected', description: `Withdrawal for ${request.user} has been rejected and funds returned.`});
+            } else {
+                 toast({ variant: 'destructive', title: 'Refund Failed', description: `User with email ${request.userId} not found.`});
             }
-            return user;
-        });
-        localStorage.setItem('users', JSON.stringify(updatedUsers));
-        window.dispatchEvent(new StorageEvent('storage', { key: 'users' }));
-        window.dispatchEvent(new StorageEvent('storage', { key: 'currentUser' })); // Notify other tabs
-        toast({ variant: 'destructive', title: 'Request Rejected', description: `Withdrawal for ${request.user} has been rejected and funds returned.`});
+        }
     }
   };
 
