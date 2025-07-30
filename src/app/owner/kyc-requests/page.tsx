@@ -17,10 +17,10 @@ import {
 import Image from "next/image";
 import { useToast } from '@/hooks/use-toast';
 import { app } from '@/lib/firebase';
-import { getDatabase, ref, update, get } from "firebase/database";
+import { getDatabase, ref, update, get, onValue, off, remove } from "firebase/database";
 
 type KycRequest = { 
-    id: string;
+    id: string; // This will be the Firebase key
     userId: string;
     user: string;
     documentType: string;
@@ -35,56 +35,50 @@ export default function OwnerKycRequestsPage() {
   const { toast } = useToast();
 
   useEffect(() => {
-      const storedRequests = localStorage.getItem('kycRequests');
-      if (storedRequests) {
-          setRequests(JSON.parse(storedRequests));
-      }
+    const db = getDatabase(app);
+    const requestsRef = ref(db, 'kycRequests');
 
-      const handleStorageChange = (event: StorageEvent) => {
-          if (event.key === 'kycRequests') {
-              const updatedRequests = localStorage.getItem('kycRequests');
-              if (updatedRequests) {
-                  setRequests(JSON.parse(updatedRequests));
-              }
-          }
-      };
-      window.addEventListener('storage', handleStorageChange);
-      return () => window.removeEventListener('storage', handleStorageChange);
+    const listener = onValue(requestsRef, (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            const requestList = Object.keys(data).map(key => ({
+                id: key,
+                ...data[key]
+            }));
+            setRequests(requestList);
+        } else {
+            setRequests([]);
+        }
+    });
+
+    return () => {
+        off(requestsRef, 'value', listener);
+    };
   }, []);
 
   const handleAction = async (request: KycRequest, status: 'approved' | 'rejected') => {
-    // Remove the request from the pending list
-    const updatedRequests = requests.filter(req => req.id !== request.id);
-    setRequests(updatedRequests);
-    localStorage.setItem('kycRequests', JSON.stringify(updatedRequests));
-    window.dispatchEvent(new StorageEvent('storage', { key: 'kycRequests' }));
-
     const db = getDatabase(app);
+    const requestRef = ref(db, `kycRequests/${request.id}`);
+    
+    // Remove the request from the pending list in Firebase
+    await remove(requestRef);
+
     const usersRef = ref(db, 'users');
     const snapshot = await get(usersRef);
 
     if (snapshot.exists()) {
         let userToUpdate: any = null;
-        let userIdToUpdate: string | null = null;
+        let userKey: string | null = null;
         snapshot.forEach((childSnapshot) => {
-            const user = childSnapshot.val();
-            if (user.email === request.userId) {
-                userToUpdate = user;
-                userIdToUpdate = childSnapshot.key;
+            if (childSnapshot.val().id === request.userId) {
+                userToUpdate = childSnapshot.val();
+                userKey = childSnapshot.key;
             }
         });
 
-        if (userToUpdate && userIdToUpdate) {
+        if (userToUpdate && userKey) {
             const newKycStatus = status === 'approved' ? 'Verified' : 'Rejected';
-            await update(ref(db, `users/${userIdToUpdate}`), { kycStatus: newKycStatus });
-            
-            // Also update currentUser if they are the one being updated
-            const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-            if (currentUser.email === request.userId) {
-                const updatedCurrentUser = { ...currentUser, kycStatus: newKycStatus };
-                localStorage.setItem('currentUser', JSON.stringify(updatedCurrentUser));
-                window.dispatchEvent(new StorageEvent('storage', { key: 'currentUser' }));
-            }
+            await update(ref(db, `users/${userKey}`), { kycStatus: newKycStatus });
             
             toast({ 
                 title: `KYC ${status === 'approved' ? 'Approved' : 'Rejected'}`,
@@ -94,7 +88,7 @@ export default function OwnerKycRequestsPage() {
              toast({ 
                 variant: 'destructive',
                 title: 'Update Failed',
-                description: `User with email ${request.userId} not found.`
+                description: `User with ID ${request.userId} not found.`
              });
         }
     }
