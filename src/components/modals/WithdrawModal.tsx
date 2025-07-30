@@ -17,7 +17,7 @@ import { useState, useEffect } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/hooks/use-toast"
-import { getDatabase, ref, update, onValue } from "firebase/database";
+import { getDatabase, ref, update, onValue, set, push } from "firebase/database";
 import { app } from "@/lib/firebase";
 
 
@@ -34,6 +34,7 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
   const [fee, setFee] = useState(0);
   const [withdrawalInfo, setWithdrawalInfo] = useState('');
   const [kycStatus, setKycStatus] = useState('Not Verified');
+  const [currentUser, setCurrentUser] = useState<any>(null);
 
   // UPI fields
   const [upiId, setUpiId] = useState('');
@@ -47,17 +48,21 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
     let unsubscribe = () => {};
     if (isOpen) {
       const savedSettings = JSON.parse(localStorage.getItem('adminSettings') || '{}');
-      const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+      const localUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+      setCurrentUser(localUser);
       
-      const db = getDatabase(app);
-      const userRef = ref(db, `users/${currentUser.id}`);
+      if (localUser.id) {
+          const db = getDatabase(app);
+          const userRef = ref(db, `users/${localUser.id}`);
 
-      unsubscribe = onValue(userRef, (snapshot) => {
-          if (snapshot.exists()) {
-              const dbUser = snapshot.val();
-              setKycStatus(dbUser.kycStatus || 'Not Verified');
-          }
-      });
+          unsubscribe = onValue(userRef, (snapshot) => {
+              if (snapshot.exists()) {
+                  const dbUser = snapshot.val();
+                  setKycStatus(dbUser.kycStatus || 'Not Verified');
+                  setCurrentUser(dbUser); // Keep user data fresh
+              }
+          });
+      }
       
 
       if (feeType === 'user') {
@@ -101,8 +106,7 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
       return;
     }
 
-    const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-    if (currentUser.wallet < numericAmount) {
+    if (!currentUser || currentUser.wallet < numericAmount) {
       toast({ variant: 'destructive', title: 'Insufficient Funds', description: 'You do not have enough funds to make this withdrawal.' });
       return;
     }
@@ -111,25 +115,18 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
     const newWalletBalance = currentUser.wallet - numericAmount;
     const db = getDatabase(app);
     await update(ref(db, `users/${currentUser.id}`), { wallet: newWalletBalance });
-    
-    const updatedUser = { ...currentUser, wallet: newWalletBalance };
-    localStorage.setItem('currentUser', JSON.stringify(updatedUser));
-    window.dispatchEvent(new StorageEvent('storage', { key: 'currentUser' }));
-
 
     const newRequest = {
-        id: `WDR${Date.now()}`,
-        userId: currentUser.email,
+        userId: currentUser.id,
         user: currentUser.name,
         amount: `₹${numericAmount.toFixed(2)}`,
-        method: isUpi ? `UPI (${upiId})` : `Bank Transfer`,
+        method: isUpi ? `UPI (${upiId})` : `Bank Transfer: Name: ${accountName}, Acct: ${accountNumber}, IFSC: ${ifscCode}`,
         date: new Date().toLocaleString(),
     };
 
-    const existingRequests = JSON.parse(localStorage.getItem('withdrawalRequests') || '[]');
-    const updatedRequests = [...existingRequests, newRequest];
-    localStorage.setItem('withdrawalRequests', JSON.stringify(updatedRequests));
-    window.dispatchEvent(new StorageEvent('storage', { key: 'withdrawalRequests' }));
+    const requestsRef = ref(db, 'withdrawalRequests');
+    const newRequestRef = push(requestsRef);
+    await set(newRequestRef, newRequest);
 
     toast({
       title: 'Request Submitted',
