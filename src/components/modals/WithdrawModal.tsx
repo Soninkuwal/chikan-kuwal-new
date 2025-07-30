@@ -12,12 +12,12 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Info } from "lucide-react"
+import { Info, ShieldAlert } from "lucide-react"
 import { useState, useEffect } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/hooks/use-toast"
-import { getDatabase, ref, get } from "firebase/database";
+import { getDatabase, ref, update, onValue } from "firebase/database";
 import { app } from "@/lib/firebase";
 
 
@@ -33,9 +33,7 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
   const [amount, setAmount] = useState<number | string>('');
   const [fee, setFee] = useState(0);
   const [withdrawalInfo, setWithdrawalInfo] = useState('');
-  const [isGateActive, setIsGateActive] = useState(false);
-  const [totalDeposits, setTotalDeposits] = useState(0);
-  const [isLoading, setIsLoading] = useState(true);
+  const [kycStatus, setKycStatus] = useState('Not Verified');
 
   // UPI fields
   const [upiId, setUpiId] = useState('');
@@ -46,56 +44,47 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
   const [ifscCode, setIfscCode] = useState('');
 
   useEffect(() => {
-    async function fetchSettingsAndUserData() {
-      if (isOpen) {
-        setIsLoading(true);
-        const savedSettings = JSON.parse(localStorage.getItem('adminSettings') || '{}');
+    let unsubscribe = () => {};
+    if (isOpen) {
+      const savedSettings = JSON.parse(localStorage.getItem('adminSettings') || '{}');
+      const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+      
+      const db = getDatabase(app);
+      const userRef = ref(db, `users/${currentUser.id}`);
 
-        // Fee and Info settings
-        if (feeType === 'user') {
-            setFee(Number(savedSettings.withdrawalFee) || 10);
-            setWithdrawalInfo(savedSettings.withdrawalInfo || 'The initial demo amount is not withdrawable. Withdrawals are subject to admin approval. A {fee}% processing fee will be applied to your winnings. You can only make one withdrawal every 24 hours.');
-        } else if (feeType === 'owner') {
-            setFee(Number(savedSettings.ownerFee) || 2);
-        } else {
-            setFee(0);
-        }
-
-        // Withdrawal Gate settings
-        setIsGateActive(savedSettings.withdrawalGate || false);
-
-        // Fetch user's total deposits
-        const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-        if (currentUser && currentUser.id) {
-          const db = getDatabase(app);
-          const transactionsRef = ref(db, `users/${currentUser.id}/transactionHistory`);
-          const snapshot = await get(transactionsRef);
+      unsubscribe = onValue(userRef, (snapshot) => {
           if (snapshot.exists()) {
-            const transactions = Object.values(snapshot.val()) as any[];
-            const depositSum = transactions
-              .filter(tx => tx.type === 'Deposit' && tx.status === 'Completed')
-              .reduce((sum, tx) => sum + tx.amount, 0);
-            setTotalDeposits(depositSum);
+              const dbUser = snapshot.val();
+              setKycStatus(dbUser.kycStatus || 'Not Verified');
           }
-        }
-        setIsLoading(false);
+      });
+      
+
+      if (feeType === 'user') {
+        setFee(Number(savedSettings.withdrawalFee) || 10);
+        setWithdrawalInfo(savedSettings.withdrawalInfo || 'The initial demo amount is not withdrawable. Withdrawals are subject to admin approval. A {fee}% processing fee will be applied to your winnings. You can only make one withdrawal every 24 hours.');
+      } else if (feeType === 'owner') {
+          setFee(Number(savedSettings.ownerFee) || 2);
+      } else {
+          setFee(0);
       }
     }
-    fetchSettingsAndUserData();
+    return () => unsubscribe();
   }, [isOpen, feeType]);
+
 
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setAmount(e.target.value);
   }
 
-  const handleSubmit = () => {
-    const isUpi = activeTab === 'upi';
-    const numericAmount = Number(amount);
-
-    if (isGateActive && totalDeposits < 2000) {
-        toast({ variant: 'destructive', title: 'Withdrawal Locked', description: 'You must deposit a total of ₹2000 to unlock withdrawals.' });
+  const handleSubmit = async () => {
+    if (kycStatus !== 'Verified') {
+        toast({ variant: 'destructive', title: 'KYC Not Verified', description: 'Please complete your KYC verification to enable withdrawals.' });
         return;
     }
+    
+    const isUpi = activeTab === 'upi';
+    const numericAmount = Number(amount);
     
     if (!numericAmount || numericAmount <= 0) {
       toast({ variant: 'destructive', title: 'Invalid Amount', description: 'Please enter a valid amount to withdraw.' });
@@ -119,9 +108,12 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
     }
 
     // Deduct from wallet immediately
-    const updatedUser = { ...currentUser, wallet: currentUser.wallet - numericAmount };
+    const newWalletBalance = currentUser.wallet - numericAmount;
+    const db = getDatabase(app);
+    await update(ref(db, `users/${currentUser.id}`), { wallet: newWalletBalance });
+    
+    const updatedUser = { ...currentUser, wallet: newWalletBalance };
     localStorage.setItem('currentUser', JSON.stringify(updatedUser));
-    window.dispatchEvent(new StorageEvent('storage', { key: 'users' }));
     window.dispatchEvent(new StorageEvent('storage', { key: 'currentUser' }));
 
 
@@ -149,7 +141,6 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
   const numericAmount = Number(amount);
   const feeAmount = numericAmount * (fee / 100);
   const receivedAmount = numericAmount - feeAmount;
-  const isWithdrawalLocked = isGateActive && totalDeposits < 2000;
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -162,29 +153,28 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
         </DialogHeader>
         <ScrollArea className="max-h-[70vh] pr-6">
             <div className="space-y-4">
-                {isLoading ? <p>Loading withdrawal rules...</p> : (
+                {kycStatus !== 'Verified' ? (
+                     <Alert variant="destructive">
+                        <ShieldAlert className="h-4 w-4"/>
+                        <AlertTitle>Withdrawals Locked</AlertTitle>
+                        <AlertDescription>
+                            Your account must be KYC verified before you can make a withdrawal. Please go to the menu and complete the KYC process.
+                        </AlertDescription>
+                    </Alert>
+                ) : (
                     <>
-                        {isWithdrawalLocked && feeType === 'user' && (
-                             <Alert variant="destructive">
-                                <Info className="h-4 w-4" />
-                                <AlertTitle>Withdrawal Locked</AlertTitle>
-                                <AlertDescription>
-                                    You have deposited ₹{totalDeposits.toFixed(2)} out of ₹2000. Please deposit ₹{(2000 - totalDeposits).toFixed(2)} more to unlock withdrawal requests.
-                                </AlertDescription>
-                            </Alert>
-                        )}
-                        {feeType === 'user' && !isWithdrawalLocked && (
-                            <Alert className="border-primary/50 text-primary [&>svg]:text-primary whitespace-pre-wrap">
-                                <Info className="h-4 w-4" />
-                                <AlertTitle>Please Note</AlertTitle>
-                                <AlertDescription>
-                                {withdrawalInfo.replace('{fee}', String(fee))}
-                                </AlertDescription>
-                            </Alert>
+                        {feeType === 'user' && (
+                        <Alert className="border-primary/50 text-primary [&>svg]:text-primary whitespace-pre-wrap">
+                            <Info className="h-4 w-4" />
+                            <AlertTitle>Please Note</AlertTitle>
+                            <AlertDescription>
+                            {withdrawalInfo.replace('{fee}', String(fee))}
+                            </AlertDescription>
+                        </Alert>
                         )}
                         <div className="space-y-2">
                             <Label htmlFor="withdraw-amount">Amount</Label>
-                            <Input id="withdraw-amount" placeholder="Enter amount" type="number" value={amount} onChange={handleAmountChange} disabled={isWithdrawalLocked} />
+                            <Input id="withdraw-amount" placeholder="Enter amount" type="number" value={amount} onChange={handleAmountChange} />
                         </div>
                         {numericAmount > 0 && fee > 0 && (
                             <div className="p-3 bg-secondary rounded-md text-sm space-y-2">
@@ -201,21 +191,21 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
                             <TabsContent value="upi" className="space-y-4 pt-4">
                                 <div className="space-y-2">
                                     <Label htmlFor="withdraw-upi">Your UPI ID</Label>
-                                    <Input id="withdraw-upi" placeholder="Enter your UPI ID" value={upiId} onChange={e => setUpiId(e.target.value)} disabled={isWithdrawalLocked}/>
+                                    <Input id="withdraw-upi" placeholder="Enter your UPI ID" value={upiId} onChange={e => setUpiId(e.target.value)} />
                                 </div>
                             </TabsContent>
                             <TabsContent value="bank" className="space-y-4 pt-4">
                                 <div className="space-y-2">
                                     <Label htmlFor="withdraw-name">Your Account Holder Name</Label>
-                                    <Input id="withdraw-name" placeholder="Enter account holder name" value={accountName} onChange={e => setAccountName(e.target.value)} disabled={isWithdrawalLocked} />
+                                    <Input id="withdraw-name" placeholder="Enter account holder name" value={accountName} onChange={e => setAccountName(e.target.value)} />
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="withdraw-account">Your Account Number</Label>
-                                    <Input id="withdraw-account" placeholder="Enter your account number" value={accountNumber} onChange={e => setAccountNumber(e.target.value)} disabled={isWithdrawalLocked}/>
+                                    <Input id="withdraw-account" placeholder="Enter your account number" value={accountNumber} onChange={e => setAccountNumber(e.target.value)}/>
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="withdraw-ifsc">Your IFSC Code</Label>
-                                    <Input id="withdraw-ifsc" placeholder="Enter your IFSC code" value={ifscCode} onChange={e => setIfscCode(e.target.value)} disabled={isWithdrawalLocked}/>
+                                    <Input id="withdraw-ifsc" placeholder="Enter your IFSC code" value={ifscCode} onChange={e => setIfscCode(e.target.value)}/>
                                 </div>
                             </TabsContent>
                         </Tabs>
@@ -224,7 +214,12 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
             </div>
         </ScrollArea>
         <DialogFooter>
-          <Button type="submit" className="w-full h-12 bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-lg" onClick={handleSubmit} disabled={isWithdrawalLocked || isLoading}>
+          <Button 
+            type="submit" 
+            className="w-full h-12 bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-lg" 
+            onClick={handleSubmit}
+            disabled={kycStatus !== 'Verified'}
+          >
             Request Withdrawal
           </Button>
         </DialogFooter>
