@@ -44,7 +44,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Badge } from '../ui/badge';
 import { app } from '@/lib/firebase';
-import { getDatabase, ref, onValue, off, update } from "firebase/database";
+import { getDatabase, ref, onValue, off, update, push, set } from "firebase/database";
 
 type SidebarProps = {
   isOpen: boolean;
@@ -98,7 +98,6 @@ export function Sidebar({
       if (snapshot.exists()) {
         const dbUser = snapshot.val();
         
-        // Combine and sync local and DB user data
         const mergedUser = { ...localUser, ...dbUser };
         localStorage.setItem('currentUser', JSON.stringify(mergedUser));
 
@@ -242,8 +241,7 @@ export function Sidebar({
     reader.onloadend = () => {
         const documentImage = reader.result as string;
         const newRequest = {
-            id: `KYC${Date.now()}`,
-            userId: currentUser.email,
+            userId: currentUser.id,
             user: currentUser.name,
             documentType: 'Aadhaar',
             documentNumber: aadhaarNumber,
@@ -251,16 +249,19 @@ export function Sidebar({
             date: new Date().toLocaleString(),
         };
 
-        const existingRequests = JSON.parse(localStorage.getItem('kycRequests') || '[]');
-        localStorage.setItem('kycRequests', JSON.stringify([...existingRequests, newRequest]));
-        window.dispatchEvent(new StorageEvent('storage', { key: 'kycRequests' }));
-        
-        // Update user's kyc status to 'Pending'
         const db = getDatabase(app);
-        update(ref(db, `users/${currentUser.id}`), { kycStatus: 'Pending' });
-
-        toast({ title: 'KYC Submitted', description: 'Your KYC details have been sent for verification.'});
-        setActiveModal(null);
+        const kycRef = ref(db, 'kycRequests');
+        const newKycRequestRef = push(kycRef);
+        set(newKycRequestRef, newRequest)
+          .then(() => {
+            update(ref(db, `users/${currentUser.id}`), { kycStatus: 'Pending' });
+            toast({ title: 'KYC Submitted', description: 'Your KYC details have been sent for verification.'});
+            setActiveModal(null);
+          })
+          .catch((error) => {
+            console.error("KYC submission failed:", error);
+            toast({ variant: 'destructive', title: 'Submission Failed', description: 'Could not submit your KYC request. Please try again.' });
+          });
     }
     reader.readAsDataURL(aadhaarFile);
   }
@@ -324,7 +325,7 @@ export function Sidebar({
             return (
                 <div className="flex flex-col items-center justify-center text-center space-y-4">
                     <CheckCircle className="h-16 w-16 text-green-500"/>
-                    <h3 className="text-xl font-bold">✅ Your KYC has been verified and accepted.</h3>
+                    <h3 className="text-xl font-bold">Your KYC has been verified and accepted.</h3>
                     <p className="text-muted-foreground">You now have full access to all features, including withdrawals.</p>
                 </div>
             )
@@ -333,8 +334,8 @@ export function Sidebar({
             return (
                 <div className="flex flex-col items-center justify-center text-center space-y-4">
                     <History className="h-16 w-16 text-yellow-500"/>
-                    <h3 className="text-xl font-bold">Your account is pending KYC verification.</h3>
-                    <p className="text-muted-foreground">Your KYC details are being reviewed. This usually takes 24-48 hours.</p>
+                    <h3 className="text-xl font-bold">Your KYC is pending verification.</h3>
+                    <p className="text-muted-foreground">Your details are being reviewed. This usually takes 24-48 hours.</p>
                 </div>
             )
         }
@@ -342,9 +343,12 @@ export function Sidebar({
             return (
                 <div className="flex flex-col items-center justify-center text-center space-y-4">
                     <AlertCircle className="h-16 w-16 text-red-500"/>
-                    <h3 className="text-xl font-bold">❌ Your KYC has been rejected.</h3>
+                    <h3 className="text-xl font-bold">Your KYC has been rejected.</h3>
                     <p className="text-muted-foreground">Please re-submit with correct details.</p>
-                    <Button onClick={() => update(ref(db, `users/${currentUser.id}`), { kycStatus: 'Not Verified' })} >Re-submit KYC</Button>
+                    <Button onClick={() => {
+                        const db = getDatabase(app);
+                        update(ref(db, `users/${currentUser.id}`), { kycStatus: 'Not Verified' });
+                    }}>Re-submit KYC</Button>
                 </div>
             )
         }
