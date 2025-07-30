@@ -1,6 +1,6 @@
 
 'use client'
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -9,13 +9,12 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { useState, useEffect } from "react"
 import {
   AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogCancel,
 } from "@/components/ui/alert-dialog"
 import { app } from "@/lib/firebase"
 import { getDatabase, ref, onValue } from "firebase/database"
@@ -27,6 +26,7 @@ type User = {
     status: 'Active' | 'Banned';
     role: 'Player' | 'Admin' | 'Owner';
     wallet: number;
+    kycStatus: 'Verified' | 'Pending' | 'Rejected' | 'Not Verified';
 };
 
 export default function UsersPage() {
@@ -42,7 +42,9 @@ export default function UsersPage() {
             const userList = Object.keys(data).map(key => ({
                 id: key,
                 ...data[key],
-                role: data[key].role || 'Player' // Default role
+                status: data[key].status || 'Active', // Default status
+                role: data[key].role || 'Player', // Default role
+                kycStatus: data[key].kycStatus || 'Not Verified',
             }));
             setUsers(userList);
         }
@@ -62,6 +64,7 @@ export default function UsersPage() {
   }
   
   return (
+    <>
     <div className="flex-1 space-y-4 p-8 pt-6">
       <div className="flex items-center justify-between space-y-2">
         <h2 className="text-3xl font-bold tracking-tight">Users</h2>
@@ -69,6 +72,7 @@ export default function UsersPage() {
       <Card>
         <CardHeader>
           <CardTitle>User Management</CardTitle>
+          <CardDescription>View, manage, and verify users.</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
@@ -78,7 +82,7 @@ export default function UsersPage() {
                 <TableHead>Email</TableHead>
                 <TableHead>Wallet</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Role</TableHead>
+                <TableHead>KYC Status</TableHead>
                 <TableHead><span className="sr-only">Actions</span></TableHead>
               </TableRow>
             </TableHeader>
@@ -87,11 +91,17 @@ export default function UsersPage() {
                 <TableRow key={user.id} onClick={() => setSelectedUser(user)} className="cursor-pointer">
                   <TableCell className="font-medium">{user.name}</TableCell>
                   <TableCell>{user.email}</TableCell>
-                  <TableCell>₹{user.wallet.toFixed(2)}</TableCell>
+                  <TableCell>₹{(user.wallet || 0).toFixed(2)}</TableCell>
                   <TableCell>
                     <Badge variant={user.status === 'Active' ? 'default' : 'destructive'}>{user.status}</Badge>
                   </TableCell>
-                  <TableCell>{user.role}</TableCell>
+                  <TableCell>
+                     <Badge 
+                      variant={user.kycStatus === 'Verified' ? 'default' : user.kycStatus === 'Pending' ? 'secondary' : user.kycStatus === 'Rejected' ? 'destructive' : 'outline'}
+                    >
+                      {user.kycStatus}
+                    </Badge>
+                  </TableCell>
                   <TableCell>
                      <DropdownMenu>
                       <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
@@ -107,7 +117,7 @@ export default function UsersPage() {
                             {user.status === 'Active' ? 'Suspend' : 'Unsuspend'}
                         </DropdownMenuItem>
                         <DropdownMenuItem 
-                            className="text-destructive"
+                            className="text-destructive focus:text-destructive"
                             onClick={() => handleDelete(user.id)}
                         >Delete</DropdownMenuItem>
                       </DropdownMenuContent>
@@ -119,6 +129,7 @@ export default function UsersPage() {
           </Table>
         </CardContent>
       </Card>
+      </div>
       {selectedUser && (
          <AlertDialog open={!!selectedUser} onOpenChange={() => setSelectedUser(null)}>
             <AlertDialogContent>
@@ -130,7 +141,8 @@ export default function UsersPage() {
                         <div><strong>Email:</strong> {selectedUser.email}</div>
                         <div><strong>Role:</strong> {selectedUser.role}</div>
                         <div><strong>Status:</strong> <Badge variant={selectedUser.status === 'Active' ? 'default' : 'destructive'}>{selectedUser.status}</Badge></div>
-                        <div><strong>Wallet Balance:</strong> ₹{selectedUser.wallet.toFixed(2)}</div>
+                        <div><strong>KYC Status:</strong> <Badge variant={selectedUser.kycStatus === 'Verified' ? 'default' : selectedUser.kycStatus === 'Pending' ? 'secondary' : selectedUser.kycStatus === 'Rejected' ? 'destructive' : 'outline'}>{selectedUser.kycStatus}</Badge></div>
+                        <div><strong>Wallet Balance:</strong> ₹{(selectedUser.wallet || 0).toFixed(2)}</div>
                     </div>
                 </AlertDialogDescription>
                 </AlertDialogHeader>
@@ -140,6 +152,6 @@ export default function UsersPage() {
             </AlertDialogContent>
         </AlertDialog>
       )}
-    </div>
+    </>
   )
 }
