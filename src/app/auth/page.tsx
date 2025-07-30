@@ -10,7 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ShieldCheck } from 'lucide-react';
 import { app } from '@/lib/firebase';
-import { getDatabase, ref, set, get, query, orderByChild, equalTo, push, child } from "firebase/database";
+import { getDatabase, ref, set, get, query, orderByChild, equalTo, push } from "firebase/database";
 
 export default function AuthPage() {
   const router = useRouter();
@@ -34,25 +34,30 @@ export default function AuthPage() {
     try {
         const usersRef = ref(db, 'users');
         const newUserRef = push(usersRef);
-        
+        const userId = newUserRef.key;
+
         const newUser = { 
-            id: newUserRef.key,
+            id: userId,
             name, 
             email: signupEmail, 
             mobile: signupMobile, 
             password: signupPassword, // In a real app, this should be hashed.
+            referralCode: referralCode || '',
             wallet: 300, 
             avatar: '',
             transactionHistory: {},
             betHistory: {},
             createdAt: new Date().toISOString(),
+            status: 'Active',
+            role: 'Player',
+            kycStatus: 'Not Verified', // Default KYC status
         };
 
         await set(newUserRef, newUser);
         
         localStorage.setItem('currentUser', JSON.stringify(newUser));
 
-        toast({ title: 'Registration Successful', description: 'Welcome! You have been logged in.' });
+        toast({ title: 'Registration Successful', description: 'Welcome! Please complete KYC to access all features.' });
         router.push('/');
 
     } catch (error: any) {
@@ -79,13 +84,18 @@ export default function AuthPage() {
 
         if (snapshot.exists()) {
             let user: any = null;
-            let userId = '';
             snapshot.forEach((childSnapshot) => {
-                userId = childSnapshot.key;
-                user = childSnapshot.val();
+                // Since email/mobile should be unique, we take the first match.
+                if (!user) {
+                  user = { id: childSnapshot.key, ...childSnapshot.val() };
+                }
             });
 
             if (user && user.password === loginPassword) {
+                if (user.status === 'Banned') {
+                    toast({ variant: 'destructive', title: 'Login Failed', description: 'Your account has been suspended.' });
+                    return;
+                }
                 localStorage.setItem('currentUser', JSON.stringify(user));
                 toast({ title: 'Login Successful', description: 'Welcome back!' });
                 router.push('/');
@@ -97,7 +107,7 @@ export default function AuthPage() {
         }
     } catch (error: any) {
         console.error("Login error:", error);
-        toast({ variant: 'destructive', title: 'Login Error', description: error.message || 'An error occurred. Please ensure database permissions are set correctly.' });
+        toast({ variant: 'destructive', title: 'Login Error', description: error.message || 'An error occurred. Please ensure database permissions and indexes are set correctly.' });
     }
   };
 
