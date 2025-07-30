@@ -17,11 +17,19 @@ import { Download, Upload, Copy } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { Separator } from "@/components/ui/separator"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { getDatabase, ref, push, set } from "firebase/database"
+import { app } from "@/lib/firebase"
+
 
 type ModalProps = {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
+};
+
+const defaultSettings = {
+    upiId: 'admin@upi',
+    upiIdLarge: 'admin-large@upi',
 };
 
 export function DepositModal({ isOpen, onOpenChange }: ModalProps) {
@@ -33,8 +41,18 @@ export function DepositModal({ isOpen, onOpenChange }: ModalProps) {
   const [bankAmount, setBankAmount] = useState('');
   const [bankUtr, setBankUtr] = useState('');
   const [bankScreenshot, setBankScreenshot] = useState<File | null>(null);
+  const [settings, setSettings] = useState(defaultSettings);
 
-  const qrCodeUrl = 'https://placehold.co/200x200.png';
+  const qrCodeUrl = `https://placehold.co/200x200.png?text=${settings.upiId}`;
+  const qrCodeUrlLarge = `https://placehold.co/200x200.png?text=${settings.upiIdLarge}`;
+
+  useEffect(() => {
+    if (isOpen) {
+      const savedSettings = JSON.parse(localStorage.getItem('adminSettings') || '{}');
+      setSettings(prev => ({...prev, ...savedSettings}));
+    }
+  }, [isOpen]);
+
 
   const copyToClipboard = (text: string, field: string) => {
     navigator.clipboard.writeText(text);
@@ -44,18 +62,18 @@ export function DepositModal({ isOpen, onOpenChange }: ModalProps) {
     })
   }
 
-  const handleDownloadQR = async () => {
+  const handleDownloadQR = async (url: string) => {
     try {
-        const response = await fetch(qrCodeUrl);
+        const response = await fetch(url);
         const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
+        const downloadUrl = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
-        link.href = url;
+        link.href = downloadUrl;
         link.setAttribute('download', 'admin-qr-code.png');
         document.body.appendChild(link);
         link.click();
         link.parentNode?.removeChild(link);
-        window.URL.revokeObjectURL(url);
+        window.URL.revokeObjectURL(downloadUrl);
     } catch (error) {
         toast({
             variant: 'destructive',
@@ -70,37 +88,53 @@ export function DepositModal({ isOpen, onOpenChange }: ModalProps) {
     const amount = isUpi ? upiAmount : bankAmount;
     const utr = isUpi ? upiUtr : bankUtr;
     const screenshot = isUpi ? upiScreenshot : bankScreenshot;
+    const currentUserStr = localStorage.getItem('currentUser');
+
+    if (!currentUserStr) {
+      toast({ variant: 'destructive', title: 'Error', description: 'You must be logged in to make a deposit.' });
+      return;
+    }
 
     if (!amount || !utr || !screenshot) {
       toast({
         variant: 'destructive',
         title: 'Incomplete Information',
-        description: 'Please fill out all fields before submitting.',
+        description: 'Please fill out all fields and upload a screenshot before submitting.',
       });
       return;
     }
+    
+    const reader = new FileReader();
+    reader.onloadend = () => {
+        const screenshotDataUrl = reader.result as string;
+        const currentUser = JSON.parse(currentUserStr);
 
-    const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-    const newRequest = {
-        id: `TXN${Date.now()}`,
-        userId: currentUser.email,
-        user: currentUser.name,
-        amount: `₹${amount}`,
-        utr: utr,
-        screenshot: URL.createObjectURL(screenshot),
-        date: new Date().toLocaleString(),
-    };
+        const newRequest = {
+            userId: currentUser.id,
+            user: currentUser.name,
+            amount: `₹${amount}`,
+            utr: utr,
+            screenshot: screenshotDataUrl,
+            date: new Date().toLocaleString(),
+        };
 
-    const existingRequests = JSON.parse(localStorage.getItem('depositRequests') || '[]');
-    const updatedRequests = [...existingRequests, newRequest];
-    localStorage.setItem('depositRequests', JSON.stringify(updatedRequests));
-    window.dispatchEvent(new StorageEvent('storage', { key: 'depositRequests' }));
-
-    toast({
-      title: 'Request Submitted',
-      description: 'Your deposit request has been sent for admin approval.',
-    });
-    onOpenChange(false);
+        const db = getDatabase(app);
+        const requestsRef = ref(db, 'depositRequests');
+        const newRequestRef = push(requestsRef);
+        set(newRequestRef, newRequest)
+          .then(() => {
+            toast({
+              title: 'Request Submitted',
+              description: 'Your deposit request has been sent for admin approval.',
+            });
+            onOpenChange(false);
+          })
+          .catch((error) => {
+            console.error("Firebase write failed:", error);
+            toast({ variant: 'destructive', title: 'Submission Failed', description: 'Could not submit your request. Please try again.'});
+          });
+    }
+    reader.readAsDataURL(screenshot);
   }
   
   const numericUpiAmount = parseFloat(upiAmount) || 0;
@@ -131,27 +165,34 @@ export function DepositModal({ isOpen, onOpenChange }: ModalProps) {
                 {numericUpiAmount > 2000 ? (
                     <div className="space-y-2 text-center p-4 bg-secondary rounded-lg">
                         <Label>For amounts over ₹2000, please use this UPI ID:</Label>
-                        <div className="flex items-center gap-2">
-                            <p className="flex-1 font-mono text-base p-2 bg-background rounded-md">admin-large-deposits@upi</p>
-                            <Button size="icon" variant="ghost" onClick={() => copyToClipboard('admin-large-deposits@upi', 'UPI ID')}>
+                         <div className="flex items-center gap-2">
+                            <p className="flex-1 font-mono text-base p-2 bg-background rounded-md">{settings.upiIdLarge}</p>
+                            <Button size="icon" variant="ghost" onClick={() => copyToClipboard(settings.upiIdLarge, 'UPI ID')}>
                                 <Copy className="h-4 w-4"/>
+                            </Button>
+                        </div>
+                        <div className="flex flex-col items-center gap-2 pt-2">
+                            <Image src={qrCodeUrlLarge} data-ai-hint="QR code" alt="Large Amount QR Code" width={200} height={200} className="rounded-lg border-4 border-primary" />
+                            <Button variant="outline" size="sm" onClick={() => handleDownloadQR(qrCodeUrlLarge)}>
+                                <Download className="mr-2 h-4 w-4" />
+                                Download QR
                             </Button>
                         </div>
                     </div>
                 ) : (
                     <>
                         <div className="space-y-2 text-center">
-                            <Label>(₹2000) se upar ke amont ke liye upi id ka estemal kare</Label>
+                            <Label>Scan the QR or use the UPI ID below.</Label>
                             <div className="flex items-center gap-2">
-                                <p className="flex-1 font-mono text-base p-2 bg-secondary rounded-md">admin@upi</p>
-                                <Button size="icon" variant="ghost" onClick={() => copyToClipboard('admin@upi', 'UPI ID')}>
+                                <p className="flex-1 font-mono text-base p-2 bg-secondary rounded-md">{settings.upiId}</p>
+                                <Button size="icon" variant="ghost" onClick={() => copyToClipboard(settings.upiId, 'UPI ID')}>
                                     <Copy className="h-4 w-4"/>
                                 </Button>
                             </div>
                         </div>
                         <div className="flex flex-col items-center gap-2">
                             <Image src={qrCodeUrl} data-ai-hint="QR code" alt="QR Code" width={200} height={200} className="rounded-lg border-4 border-primary" />
-                            <Button variant="outline" size="sm" onClick={handleDownloadQR}>
+                            <Button variant="outline" size="sm" onClick={() => handleDownloadQR(qrCodeUrl)}>
                                 <Download className="mr-2 h-4 w-4" />
                                 Download QR
                             </Button>
@@ -172,7 +213,7 @@ export function DepositModal({ isOpen, onOpenChange }: ModalProps) {
             {/* Bank Tab */}
             <TabsContent value="bank" className="space-y-4 pt-4">
                 <div className="space-y-2">
-                <Label htmlFor="bank-amount">Amount (Min. ₹200, Max. ₹2000)</Label>
+                <Label htmlFor="bank-amount">Amount (Min. ₹200)</Label>
                 <Input id="bank-amount" placeholder="Enter amount" type="number" value={bankAmount} onChange={(e) => setBankAmount(e.target.value)} />
                 </div>
                 <div className="p-4 bg-secondary rounded-md space-y-3 text-sm">
