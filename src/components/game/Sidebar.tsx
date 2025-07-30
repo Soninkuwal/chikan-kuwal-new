@@ -30,6 +30,8 @@ import {
   Upload,
   Copy,
   User,
+  CheckCircle,
+  AlertCircle
 } from 'lucide-react'
 import { DepositModal } from '@/components/modals/DepositModal'
 import { WithdrawModal } from '@/components/modals/WithdrawModal'
@@ -67,8 +69,11 @@ export function Sidebar({
   const [chatTarget, setChatTarget] = useState<'admin' | 'owner' | null>(null);
   const { toast } = useToast();
   const [currentUser, setCurrentUser] = useState<any>({ name: 'User', email: 'user@example.com', avatar: '', avatarFallback: 'U', transactionHistory: [], betHistory: [] });
-  const [tempUsername, setTempUsername] = useState(currentUser.name);
+  const [tempUsername, setTempUsername] = useState('');
   const [isEditingProfile, setIsEditingProfile] = useState(false);
+
+  const [aadhaarNumber, setAadhaarNumber] = useState('');
+  const [aadhaarFile, setAadhaarFile] = useState<File | null>(null);
 
 
   const [poweredBy, setPoweredBy] = useState('yaar tera badmas hai jaanu');
@@ -89,7 +94,7 @@ export function Sidebar({
     const db = getDatabase(app);
     const userRef = ref(db, `users/${userId}`);
 
-    onValue(userRef, (snapshot) => {
+    const listener = onValue(userRef, (snapshot) => {
       if (snapshot.exists()) {
         const dbUser = snapshot.val();
         
@@ -97,8 +102,8 @@ export function Sidebar({
         const mergedUser = { ...localUser, ...dbUser };
         localStorage.setItem('currentUser', JSON.stringify(mergedUser));
 
-        const transactionHistory = dbUser.transactionHistory ? Object.values(dbUser.transactionHistory).reverse() : [];
-        const betHistory = dbUser.betHistory ? Object.values(dbUser.betHistory).reverse() : [];
+        const transactionHistory = dbUser.transactionHistory ? Object.values(dbUser.transactionHistory).sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime()) : [];
+        const betHistory = dbUser.betHistory ? Object.values(dbUser.betHistory).sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime()) : [];
         
         setCurrentUser({
             ...mergedUser,
@@ -121,11 +126,11 @@ export function Sidebar({
          })
      }
 
-     return () => off(userRef);
+     return () => off(userRef, 'value', listener);
   }, []);
 
   useEffect(() => {
-    let unsubscribe = () => {};
+    let unsubscribe: () => void = () => {};
     if (isOpen) {
       unsubscribe = updateSidebarData();
     }
@@ -172,6 +177,7 @@ export function Sidebar({
 
   const handleProfileClick = () => {
     onOpenChange(false);
+    setTempUsername(currentUser.name);
     setTimeout(() => setActiveModal('profile'), 200);
   }
 
@@ -226,6 +232,39 @@ export function Sidebar({
       }
   }
 
+  const handleKycSubmit = () => {
+    if (!aadhaarNumber || !aadhaarFile) {
+        toast({ variant: 'destructive', title: 'Incomplete Information', description: 'Please provide Aadhaar number and upload the document.'});
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+        const documentImage = reader.result as string;
+        const newRequest = {
+            id: `KYC${Date.now()}`,
+            userId: currentUser.email,
+            user: currentUser.name,
+            documentType: 'Aadhaar',
+            documentNumber: aadhaarNumber,
+            documentImage: documentImage,
+            date: new Date().toLocaleString(),
+        };
+
+        const existingRequests = JSON.parse(localStorage.getItem('kycRequests') || '[]');
+        localStorage.setItem('kycRequests', JSON.stringify([...existingRequests, newRequest]));
+        window.dispatchEvent(new StorageEvent('storage', { key: 'kycRequests' }));
+        
+        // Update user's kyc status to 'Pending'
+        const db = getDatabase(app);
+        update(ref(db, `users/${currentUser.id}`), { kycStatus: 'Pending' });
+
+        toast({ title: 'KYC Submitted', description: 'Your KYC details have been sent for verification.'});
+        setActiveModal(null);
+    }
+    reader.readAsDataURL(aadhaarFile);
+  }
+
 
   const getModalContent = () => {
     if (activeModal === 'chat') {
@@ -258,7 +297,7 @@ export function Sidebar({
                     {!isEditingProfile ? (
                         <div className="text-center">
                             <h3 className="text-xl font-bold">{currentUser.name}</h3>
-                            <Button variant="link" onClick={() => { setTempUsername(currentUser.name); setIsEditingProfile(true); }}>Edit Name</Button>
+                            <Button variant="link" onClick={() => { setIsEditingProfile(true); }}>Edit Name</Button>
                         </div>
                     ) : (
                         <div className="w-full space-y-2">
@@ -281,25 +320,53 @@ export function Sidebar({
       case 'support':
         return <p className='whitespace-pre-wrap'>{infoContent.supportInfo}</p>;
       case 'kyc':
+        if (currentUser.kycStatus === 'Verified') {
+            return (
+                <div className="flex flex-col items-center justify-center text-center space-y-4">
+                    <CheckCircle className="h-16 w-16 text-green-500"/>
+                    <h3 className="text-xl font-bold">✅ Your KYC has been verified and accepted.</h3>
+                    <p className="text-muted-foreground">You now have full access to all features, including withdrawals.</p>
+                </div>
+            )
+        }
+         if (currentUser.kycStatus === 'Pending') {
+            return (
+                <div className="flex flex-col items-center justify-center text-center space-y-4">
+                    <History className="h-16 w-16 text-yellow-500"/>
+                    <h3 className="text-xl font-bold">Your account is pending KYC verification.</h3>
+                    <p className="text-muted-foreground">Your KYC details are being reviewed. This usually takes 24-48 hours.</p>
+                </div>
+            )
+        }
+        if (currentUser.kycStatus === 'Rejected') {
+            return (
+                <div className="flex flex-col items-center justify-center text-center space-y-4">
+                    <AlertCircle className="h-16 w-16 text-red-500"/>
+                    <h3 className="text-xl font-bold">❌ Your KYC has been rejected.</h3>
+                    <p className="text-muted-foreground">Please re-submit with correct details.</p>
+                    <Button onClick={() => update(ref(db, `users/${currentUser.id}`), { kycStatus: 'Not Verified' })} >Re-submit KYC</Button>
+                </div>
+            )
+        }
         return (
             <div className="space-y-4">
                 <p>Please submit your Aadhaar details for verification.</p>
                 <div className="space-y-2">
                     <Label htmlFor="aadhaar-number">Aadhaar Card Number</Label>
-                    <Input id="aadhaar-number" placeholder="xxxx xxxx xxxx" />
+                    <Input id="aadhaar-number" placeholder="xxxx xxxx xxxx" value={aadhaarNumber} onChange={e => setAadhaarNumber(e.target.value)} />
                 </div>
                 <div className="space-y-2">
                     <Label htmlFor="aadhaar-upload">Upload Aadhaar Card</Label>
-                    <Input id="aadhaar-upload" type="file" />
+                    <Input id="aadhaar-upload" type="file" onChange={e => setAadhaarFile(e.target.files?.[0] || null)} />
                 </div>
-                <Button className="w-full">
+                <Button className="w-full" onClick={handleKycSubmit}>
                     <Upload className="mr-2 h-4 w-4" />
                     Submit for Verification
                 </Button>
             </div>
         );
       case 'refer_earn':
-        const referralCode = "REF123XYZ";
+        const referralCode = currentUser?.id ? currentUser.id.slice(-6).toUpperCase() : "REF123XYZ";
         return (
              <div className="space-y-4 text-center">
                 <p className='text-lg'>Refer a friend and earn <span className='font-bold text-accent'>₹50</span>!</p>
@@ -329,7 +396,7 @@ export function Sidebar({
                 <TableBody>
                     {currentUser.transactionHistory && currentUser.transactionHistory.length > 0 ? currentUser.transactionHistory.map((tx: any, index: number) => (
                         <TableRow key={index}>
-                            <TableCell className="text-xs">{tx.date}</TableCell>
+                            <TableCell className="text-xs">{new Date(tx.date).toLocaleString()}</TableCell>
                             <TableCell>{tx.type}</TableCell>
                             <TableCell className={`font-bold ${tx.amount > 0 ? 'text-green-400' : 'text-red-400'}`}>
                                 ₹{Math.abs(tx.amount).toFixed(2)}
@@ -360,7 +427,7 @@ export function Sidebar({
                 <TableBody>
                     {currentUser.betHistory && currentUser.betHistory.length > 0 ? currentUser.betHistory.map((bet: any, index: number) => (
                         <TableRow key={index}>
-                            <TableCell className="text-xs">{bet.date}</TableCell>
+                            <TableCell className="text-xs">{new Date(bet.date).toLocaleString()}</TableCell>
                             <TableCell>₹{bet.bet.toFixed(2)}</TableCell>
                             <TableCell>{bet.cashout ? `${bet.cashout.toFixed(2)}x` : '-'}</TableCell>
                              <TableCell className={`font-bold ${bet.result === 'Win' ? 'text-green-400' : 'text-red-400'}`}>
@@ -462,7 +529,7 @@ export function Sidebar({
       </Sheet>
       
       <DepositModal isOpen={activeModal === 'deposit'} onOpenChange={onModalOpenChange} />
-      <WithdrawModal isOpen={activeModal === 'withdraw'} onOpenChange={onModalOpenChange} feeType="user" />
+      <WithdrawModal isOpen={activeModal === 'withdraw'} onOpenChange={onModalOpenChange} />
 
       <InfoModal 
         isOpen={!!activeModal && !['deposit', 'withdraw'].includes(activeModal)} 
