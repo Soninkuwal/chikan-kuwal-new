@@ -35,6 +35,7 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
   const [withdrawalInfo, setWithdrawalInfo] = useState('');
   const [kycStatus, setKycStatus] = useState('Not Verified');
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [withdrawalLimits, setWithdrawalLimits] = useState({ min: 500, max: 10000 });
 
   // UPI fields
   const [upiId, setUpiId] = useState('');
@@ -51,6 +52,11 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
       const localUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
       setCurrentUser(localUser);
       
+      setWithdrawalLimits({
+          min: Number(savedSettings.minWithdrawal) || 500,
+          max: Number(savedSettings.maxWithdrawal) || 10000,
+      });
+
       if (localUser.id) {
           const db = getDatabase(app);
           const userRef = ref(db, `users/${localUser.id}`);
@@ -93,6 +99,11 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
     
     if (!numericAmount || numericAmount <= 0) {
       toast({ variant: 'destructive', title: 'Invalid Amount', description: 'Please enter a valid amount to withdraw.' });
+      return;
+    }
+
+    if (numericAmount < withdrawalLimits.min || numericAmount > withdrawalLimits.max) {
+      toast({ variant: 'destructive', title: 'Invalid Amount', description: `Withdrawal amount must be between ₹${withdrawalLimits.min} and ₹${withdrawalLimits.max}.` });
       return;
     }
 
@@ -170,7 +181,7 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
                         </Alert>
                         )}
                         <div className="space-y-2">
-                            <Label htmlFor="withdraw-amount">Amount</Label>
+                            <Label htmlFor="withdraw-amount">Amount (Min: ₹{withdrawalLimits.min}, Max: ₹{withdrawalLimits.max})</Label>
                             <Input id="withdraw-amount" placeholder="Enter amount" type="number" value={amount} onChange={handleAmountChange} />
                         </div>
                         {numericAmount > 0 && fee > 0 && (
@@ -224,3 +235,5 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
     </Dialog>
   );
 }
+
+    
