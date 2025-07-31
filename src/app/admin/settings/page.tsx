@@ -15,6 +15,8 @@ const defaultSettings = {
     withdrawalFee: '10',
     minDeposit: '200',
     maxDeposit: '2000',
+    minWithdrawal: '500',
+    maxWithdrawal: '10000',
     difficultyEasyMin: '1.01',
     difficultyEasyMax: '2.00',
     difficultyMediumMin: '1.50',
@@ -32,7 +34,7 @@ const defaultSettings = {
     withdrawalInfo: 'The initial demo amount is not withdrawable. Withdrawals are subject to admin approval. A {fee}% processing fee will be applied to your winnings. You can only make one withdrawal every 24 hours.',
     upiId: 'admin@upi',
     upiIdLarge: 'admin-large@upi',
-    kycAutoApproveTime: '5',
+    kycAutoApproveTime: '1',
 };
 
 export default function SettingsPage() {
@@ -104,6 +106,16 @@ export default function SettingsPage() {
                             <Input id="maxDeposit" value={settings.maxDeposit} onChange={handleInputChange} type="number" />
                         </div>
                     </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="minWithdrawal">Minimum Withdrawal</Label>
+                            <Input id="minWithdrawal" value={settings.minWithdrawal} onChange={handleInputChange} type="number" />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="maxWithdrawal">Maximum Withdrawal</Label>
+                            <Input id="maxWithdrawal" value={settings.maxWithdrawal} onChange={handleInputChange} type="number" />
+                        </div>
+                    </div>
                      <div className="space-y-2">
                         <Label htmlFor="kycAutoApproveTime">KYC Auto-Approve Time (minutes)</Label>
                         <Input id="kycAutoApproveTime" value={settings.kycAutoApproveTime} onChange={handleInputChange} type="number" />
@@ -117,11 +129,11 @@ export default function SettingsPage() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <div className="space-y-2">
-                        <Label htmlFor="upiId">Default UPI ID (For deposits up to ₹2000)</Label>
+                        <Label htmlFor="upiId">Default UPI ID (For deposits up to ₹{settings.maxDeposit})</Label>
                         <Input id="upiId" value={settings.upiId} onChange={handleInputChange} placeholder="e.g., yourname@upi" />
                     </div>
                     <div className="space-y-2">
-                        <Label htmlFor="upiIdLarge">Large Amount UPI ID (For deposits over ₹2000)</Label>
+                        <Label htmlFor="upiIdLarge">Large Amount UPI ID (For deposits over ₹{settings.maxDeposit})</Label>
                         <Input id="upiIdLarge" value={settings.upiIdLarge} onChange={handleInputChange} placeholder="e.g., business@upi" />
                     </div>
                 </CardContent>
