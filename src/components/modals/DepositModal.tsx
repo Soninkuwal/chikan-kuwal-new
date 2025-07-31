@@ -17,22 +17,18 @@ import { Download, Upload, Copy } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { Separator } from "@/components/ui/separator"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { getDatabase, ref, push, set } from "firebase/database"
 import { app } from "@/lib/firebase"
-
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert"
 
 type ModalProps = {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
+  settings: any;
 };
 
-const defaultSettings = {
-    upiId: 'admin@upi',
-    upiIdLarge: 'admin-large@upi',
-};
-
-export function DepositModal({ isOpen, onOpenChange }: ModalProps) {
+export function DepositModal({ isOpen, onOpenChange, settings }: ModalProps) {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('upi');
   const [upiAmount, setUpiAmount] = useState('');
@@ -41,19 +37,15 @@ export function DepositModal({ isOpen, onOpenChange }: ModalProps) {
   const [bankAmount, setBankAmount] = useState('');
   const [bankUtr, setBankUtr] = useState('');
   const [bankScreenshot, setBankScreenshot] = useState<File | null>(null);
-  const [settings, setSettings] = useState(defaultSettings);
 
-  const qrCodeUrl = `https://placehold.co/200x200.png?text=${settings.upiId}`;
-  const qrCodeUrlLarge = `https://placehold.co/200x200.png?text=${settings.upiIdLarge}`;
+  const minDeposit = settings?.minDeposit || '200';
+  const maxDeposit = settings?.maxDeposit || '2000';
+  const upiId = settings?.upiId || 'admin@upi';
+  const upiIdLarge = settings?.upiIdLarge || 'admin-large@upi';
 
-  useEffect(() => {
-    if (isOpen) {
-      const savedSettings = JSON.parse(localStorage.getItem('adminSettings') || '{}');
-      setSettings(prev => ({...prev, ...savedSettings}));
-    }
-  }, [isOpen]);
-
-
+  const qrCodeUrl = `https://placehold.co/200x200.png?text=${upiId}`;
+  const qrCodeUrlLarge = `https://placehold.co/200x200.png?text=${upiIdLarge}`;
+  
   const copyToClipboard = (text: string, field: string) => {
     navigator.clipboard.writeText(text);
     toast({
@@ -85,10 +77,20 @@ export function DepositModal({ isOpen, onOpenChange }: ModalProps) {
 
   const handleSubmit = () => {
     const isUpi = activeTab === 'upi';
-    const amount = isUpi ? upiAmount : bankAmount;
+    const amountStr = isUpi ? upiAmount : bankAmount;
+    const amount = parseFloat(amountStr);
     const utr = isUpi ? upiUtr : bankUtr;
     const screenshot = isUpi ? upiScreenshot : bankScreenshot;
     const currentUserStr = localStorage.getItem('currentUser');
+    
+    if (amount < parseFloat(minDeposit)) {
+        toast({ variant: 'destructive', title: 'Deposit Too Low', description: `The minimum deposit amount is ₹${minDeposit}.`});
+        return;
+    }
+     if (amount > parseFloat(maxDeposit)) {
+        toast({ variant: 'destructive', title: 'Deposit Too High', description: `The maximum deposit amount is ₹${maxDeposit}.`});
+        return;
+    }
 
     if (!currentUserStr) {
       toast({ variant: 'destructive', title: 'Error', description: 'You must be logged in to make a deposit.' });
@@ -115,7 +117,7 @@ export function DepositModal({ isOpen, onOpenChange }: ModalProps) {
             amount: `₹${amount}`,
             utr: utr,
             screenshot: screenshotDataUrl,
-            date: new Date().toLocaleString(),
+            date: new Date().toISOString(),
         };
 
         const db = getDatabase(app);
@@ -138,6 +140,7 @@ export function DepositModal({ isOpen, onOpenChange }: ModalProps) {
   }
   
   const numericUpiAmount = parseFloat(upiAmount) || 0;
+  const maxDepositThreshold = parseFloat(maxDeposit) / 2; // Example threshold
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -157,17 +160,23 @@ export function DepositModal({ isOpen, onOpenChange }: ModalProps) {
             
             {/* UPI Tab */}
             <TabsContent value="upi" className="space-y-4 pt-4">
+                 <Alert>
+                    <AlertTitle>Deposit Limits</AlertTitle>
+                    <AlertDescription>
+                        Minimum: ₹{minDeposit} | Maximum: ₹{maxDeposit}
+                    </AlertDescription>
+                </Alert>
                 <div className="space-y-2">
-                <Label htmlFor="upi-amount">Amount (Min. ₹200)</Label>
+                <Label htmlFor="upi-amount">Amount</Label>
                 <Input id="upi-amount" placeholder="Enter amount" type="number" value={upiAmount} onChange={(e) => setUpiAmount(e.target.value)} />
                 </div>
                 
-                {numericUpiAmount > 2000 ? (
+                {numericUpiAmount > maxDepositThreshold ? (
                     <div className="space-y-2 text-center p-4 bg-secondary rounded-lg">
-                        <Label>For amounts over ₹2000, please use this UPI ID:</Label>
+                        <Label>For amounts over ₹{maxDepositThreshold}, please use this UPI ID:</Label>
                          <div className="flex items-center gap-2">
-                            <p className="flex-1 font-mono text-base p-2 bg-background rounded-md">{settings.upiIdLarge}</p>
-                            <Button size="icon" variant="ghost" onClick={() => copyToClipboard(settings.upiIdLarge, 'UPI ID')}>
+                            <p className="flex-1 font-mono text-base p-2 bg-background rounded-md">{upiIdLarge}</p>
+                            <Button size="icon" variant="ghost" onClick={() => copyToClipboard(upiIdLarge, 'UPI ID')}>
                                 <Copy className="h-4 w-4"/>
                             </Button>
                         </div>
@@ -184,8 +193,8 @@ export function DepositModal({ isOpen, onOpenChange }: ModalProps) {
                         <div className="space-y-2 text-center">
                             <Label>Scan the QR or use the UPI ID below.</Label>
                             <div className="flex items-center gap-2">
-                                <p className="flex-1 font-mono text-base p-2 bg-secondary rounded-md">{settings.upiId}</p>
-                                <Button size="icon" variant="ghost" onClick={() => copyToClipboard(settings.upiId, 'UPI ID')}>
+                                <p className="flex-1 font-mono text-base p-2 bg-secondary rounded-md">{upiId}</p>
+                                <Button size="icon" variant="ghost" onClick={() => copyToClipboard(upiId, 'UPI ID')}>
                                     <Copy className="h-4 w-4"/>
                                 </Button>
                             </div>
@@ -212,8 +221,14 @@ export function DepositModal({ isOpen, onOpenChange }: ModalProps) {
             
             {/* Bank Tab */}
             <TabsContent value="bank" className="space-y-4 pt-4">
+                 <Alert>
+                    <AlertTitle>Deposit Limits</AlertTitle>
+                    <AlertDescription>
+                        Minimum: ₹{minDeposit} | Maximum: ₹{maxDeposit}
+                    </AlertDescription>
+                </Alert>
                 <div className="space-y-2">
-                <Label htmlFor="bank-amount">Amount (Min. ₹200)</Label>
+                <Label htmlFor="bank-amount">Amount</Label>
                 <Input id="bank-amount" placeholder="Enter amount" type="number" value={bankAmount} onChange={(e) => setBankAmount(e.target.value)} />
                 </div>
                 <div className="p-4 bg-secondary rounded-md space-y-3 text-sm">
