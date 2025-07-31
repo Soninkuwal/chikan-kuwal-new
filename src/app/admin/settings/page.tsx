@@ -8,19 +8,24 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from '@/hooks/use-toast';
+import { getDatabase, ref, get, set } from 'firebase/database';
+import { app } from '@/lib/firebase';
 
 const defaultSettings = {
     minBet: '100',
     maxBet: '5000',
-    withdrawalFee: '10',
     minDeposit: '200',
     maxDeposit: '2000',
+    minWithdraw: '500',
+    maxWithdraw: '10000',
+    withdrawalFee: '10',
     difficultyEasyMin: '1.01',
     difficultyEasyMax: '2.00',
     difficultyMediumMin: '1.50',
     difficultyMediumMax: '5.00',
     difficultyHardMin: '2.00',
     difficultyHardMax: '10.00',
+    kycAutoApproveTime: '0',
     siteTitle: 'Chicken Road Riches',
     siteIcon: 'https://chickenroad.rajmines.com/images/chicken.png',
     siteVersion: '1.0',
@@ -38,10 +43,15 @@ export default function SettingsPage() {
     const [settings, setSettings] = useState(defaultSettings);
 
     useEffect(() => {
-        const savedSettings = localStorage.getItem('adminSettings');
-        if (savedSettings) {
-            setSettings(prev => ({...prev, ...JSON.parse(savedSettings)}));
-        }
+        const db = getDatabase(app);
+        const settingsRef = ref(db, 'settings');
+        get(settingsRef).then((snapshot) => {
+            if (snapshot.exists()) {
+                const dbSettings = snapshot.val();
+                setSettings(prev => ({...prev, ...dbSettings}));
+                localStorage.setItem('adminSettings', JSON.stringify(dbSettings));
+            }
+        });
     }, []);
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -54,12 +64,16 @@ export default function SettingsPage() {
     };
 
     const handleSave = () => {
-        localStorage.setItem('adminSettings', JSON.stringify(settings));
-        toast({
-            title: "Settings Saved",
-            description: "All admin settings have been updated successfully.",
+        const db = getDatabase(app);
+        const settingsRef = ref(db, 'settings');
+        set(settingsRef, settings).then(() => {
+            localStorage.setItem('adminSettings', JSON.stringify(settings));
+            toast({
+                title: "Settings Saved",
+                description: "All admin settings have been updated successfully and saved to the database.",
+            });
+            window.dispatchEvent(new StorageEvent('storage', { key: 'adminSettings' }));
         });
-        window.dispatchEvent(new StorageEvent('storage', { key: 'adminSettings' }));
     };
 
   return (
@@ -86,10 +100,6 @@ export default function SettingsPage() {
                             <Input id="maxBet" value={settings.maxBet} onChange={handleInputChange} type="number" />
                         </div>
                     </div>
-                     <div className="space-y-2">
-                        <Label htmlFor="withdrawalFee">Withdrawal Fee (%)</Label>
-                        <Input id="withdrawalFee" value={settings.withdrawalFee} onChange={handleInputChange} type="number" />
-                    </div>
                     <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <Label htmlFor="minDeposit">Minimum Deposit</Label>
@@ -100,6 +110,20 @@ export default function SettingsPage() {
                             <Input id="maxDeposit" value={settings.maxDeposit} onChange={handleInputChange} type="number" />
                         </div>
                     </div>
+                     <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="minWithdraw">Minimum Withdraw</Label>
+                            <Input id="minWithdraw" value={settings.minWithdraw} onChange={handleInputChange} type="number" />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="maxWithdraw">Maximum Withdraw</Label>
+                            <Input id="maxWithdraw" value={settings.maxWithdraw} onChange={handleInputChange} type="number" />
+                        </div>
+                    </div>
+                     <div className="space-y-2">
+                        <Label htmlFor="withdrawalFee">Withdrawal Fee (%)</Label>
+                        <Input id="withdrawalFee" value={settings.withdrawalFee} onChange={handleInputChange} type="number" />
+                    </div>
                     <div className="flex items-center space-x-2 pt-2">
                         <Switch id="withdrawalGate" checked={settings.withdrawalGate} onCheckedChange={(c) => handleSwitchChange(c, 'withdrawalGate')} />
                         <Label htmlFor="withdrawalGate">Enable Withdrawal Gate (Require ₹2000 Deposit)</Label>
@@ -108,17 +132,11 @@ export default function SettingsPage() {
             </Card>
              <Card>
                 <CardHeader>
-                    <CardTitle>Game Difficulty</CardTitle>
-                    <CardDescription>Set the crash multipliers for each level.</CardDescription>
+                    <CardTitle>Game Difficulty & Automation</CardTitle>
+                    <CardDescription>Set multipliers and automation rules.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <div className="hidden sm:grid grid-cols-3 gap-4">
-                            <Label>Level</Label>
-                            <Label>Min Multiplier</Label>
-                            <Label>Max Multiplier</Label>
-                        </div>
-                    </div>
+                    <Label className='text-base'>Game Difficulty</Label>
                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
                         <Label>Easy</Label>
                         <Input id="difficultyEasyMin" value={settings.difficultyEasyMin} onChange={handleInputChange} type="number" placeholder="Min"/>
@@ -133,6 +151,13 @@ export default function SettingsPage() {
                         <Label>Hard</Label>
                         <Input id="difficultyHardMin" value={settings.difficultyHardMin} onChange={handleInputChange} type="number" placeholder="Min"/>
                         <Input id="difficultyHardMax" value={settings.difficultyHardMax} onChange={handleInputChange} type="number" placeholder="Max"/>
+                    </div>
+                    <div className="border-t pt-4 space-y-2">
+                        <Label className="text-base">KYC Automation</Label>
+                        <div>
+                            <Label htmlFor="kycAutoApproveTime">KYC Auto-Approve Time (minutes)</Label>
+                            <Input id="kycAutoApproveTime" value={settings.kycAutoApproveTime} onChange={handleInputChange} type="number" placeholder="0 for instant" />
+                        </div>
                     </div>
                 </CardContent>
             </Card>
