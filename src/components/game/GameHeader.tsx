@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 type GameHeaderProps = {
   onMenuClick: () => void;
   walletBalance: number;
+  settings: any;
 };
 
 const dummyWinners = [
@@ -23,16 +24,17 @@ const dummyWinners = [
     { name: 'JackpotJoe', amount: '₹8,750' },
 ];
 
-export default function GameHeader({ onMenuClick, walletBalance }: GameHeaderProps) {
+export default function GameHeader({ onMenuClick, walletBalance, settings }: GameHeaderProps) {
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [liveUsers, setLiveUsers] = useState(18289);
   const isMobile = useIsMobile();
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [siteSettings, setSiteSettings] = useState({
-      title: 'Chicken Road',
-      icon: 'https://chickenroad.rajmines.com/images/chicken.png',
-      version: '1.0'
-  });
+  
+  const siteSettings = {
+      title: settings?.siteTitle || 'Chicken Road',
+      icon: settings?.siteIcon || 'https://chickenroad.rajmines.com/images/chicken.png',
+      version: settings?.siteVersion || '1.0'
+  };
 
   const toggleFullScreen = () => {
     if (!document.fullscreenElement) {
@@ -54,26 +56,12 @@ export default function GameHeader({ onMenuClick, walletBalance }: GameHeaderPro
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
-  const updateSettings = () => {
-    const savedSettings = localStorage.getItem('adminSettings');
-    if (savedSettings) {
-      const settings = JSON.parse(savedSettings);
-      setSiteSettings({
-        title: settings.siteTitle || 'Chicken Road',
-        icon: settings.siteIcon || 'https://chickenroad.rajmines.com/images/chicken.png',
-        version: settings.siteVersion || '1.0'
-      });
-    }
-  };
-
   useEffect(() => {
-    updateSettings();
     const interval = setInterval(() => {
         setLiveUsers(prev => prev + Math.floor(Math.random() * 21) - 10);
     }, 3000);
-    window.addEventListener('storage', updateSettings);
+
     return () => {
-        window.removeEventListener('storage', updateSettings);
         clearInterval(interval);
     };
   }, []);
@@ -139,8 +127,8 @@ export default function GameHeader({ onMenuClick, walletBalance }: GameHeaderPro
         </div>
       </header>
 
-      <DepositModal isOpen={activeModal === 'deposit'} onOpenChange={(open) => !open && setActiveModal(null)} />
-      <WithdrawModal isOpen={activeModal === 'withdraw'} onOpenChange={(open) => !open && setActiveModal(null)} />
+      <DepositModal isOpen={activeModal === 'deposit'} onOpenChange={(open) => !open && setActiveModal(null)} settings={settings} />
+      <WithdrawModal isOpen={activeModal === 'withdraw'} onOpenChange={(open) => !open && setActiveModal(null)} settings={settings} />
        <style jsx global>{`
         @keyframes scroll-h {
           0% {
