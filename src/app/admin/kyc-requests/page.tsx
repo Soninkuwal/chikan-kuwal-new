@@ -27,40 +27,27 @@ type KycRequest = {
     documentNumber: string;
     documentImage: string;
     date: string;
+    createdAt: number;
 };
 
 export default function KycRequestsPage() {
   const [requests, setRequests] = useState<KycRequest[]>([]);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [autoApproveTime, setAutoApproveTime] = useState(5 * 60 * 1000); // default 5 minutes
   const { toast } = useToast();
 
   useEffect(() => {
-    const db = getDatabase(app);
-    const requestsRef = ref(db, 'kycRequests');
-
-    const listener = onValue(requestsRef, (snapshot) => {
-        const data = snapshot.val();
-        if (data) {
-            const requestList = Object.keys(data).map(key => ({
-                id: key,
-                ...data[key]
-            }));
-            setRequests(requestList);
-        } else {
-            setRequests([]);
-        }
-    });
-
-    return () => {
-        off(requestsRef, 'value', listener);
-    };
+    const savedSettings = localStorage.getItem('adminSettings');
+    if (savedSettings) {
+        const settings = JSON.parse(savedSettings);
+        setAutoApproveTime(parseInt(settings.kycAutoApproveTime, 10) * 60 * 1000);
+    }
   }, []);
 
   const handleAction = async (request: KycRequest, status: 'approved' | 'rejected') => {
     const db = getDatabase(app);
     const requestRef = ref(db, `kycRequests/${request.id}`);
     
-    // Remove the request from the pending list in Firebase
     await remove(requestRef);
 
     const usersRef = ref(db, 'users');
@@ -70,8 +57,10 @@ export default function KycRequestsPage() {
         let userToUpdate: any = null;
         let userKey: string | null = null;
         snapshot.forEach((childSnapshot) => {
-            if (childSnapshot.val().id === request.userId) {
-                userToUpdate = childSnapshot.val();
+            const userData = childSnapshot.val();
+            // In case the user document key is not the user's ID
+            if (userData.id === request.userId) {
+                userToUpdate = userData;
                 userKey = childSnapshot.key;
             }
         });
@@ -93,6 +82,36 @@ export default function KycRequestsPage() {
         }
     }
   };
+
+  useEffect(() => {
+    const db = getDatabase(app);
+    const requestsRef = ref(db, 'kycRequests');
+
+    const listener = onValue(requestsRef, (snapshot) => {
+        const data = snapshot.val();
+        const now = Date.now();
+        const requestList: KycRequest[] = [];
+        
+        if (data) {
+            Object.keys(data).forEach(key => {
+                const req = { id: key, ...data[key] };
+                 if (now - req.createdAt > autoApproveTime) {
+                    handleAction(req, 'approved');
+                } else {
+                    requestList.push(req);
+                }
+            });
+            setRequests(requestList);
+        } else {
+            setRequests([]);
+        }
+    });
+
+    return () => {
+        off(requestsRef, 'value', listener);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoApproveTime]);
 
   return (
     <>
