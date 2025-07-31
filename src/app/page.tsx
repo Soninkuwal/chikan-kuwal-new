@@ -11,11 +11,11 @@ import BottomNavBar from '@/components/game/BottomNavBar';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Skeleton } from '@/components/ui/skeleton';
 import { app } from '@/lib/firebase';
-import { getDatabase, ref, update, push, set, get, child } from 'firebase/database';
+import { getDatabase, ref, update, push, set, get, onValue, off } from 'firebase/database';
 
 export type GameState = 'ready' | 'running' | 'finished';
 export type Difficulty = 'easy' | 'medium' | 'hard';
-const GAME_STEP_INTERVAL = 1000; // ms per step
+const GAME_STEP_INTERVAL = 100; // ms per step, increased for slower motion
 
 export default function Home() {
   const router = useRouter();
@@ -33,22 +33,36 @@ export default function Home() {
   const isMobile = useIsMobile();
   const gameIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
-  const updateWalletInUI = () => {
-    const userStr = localStorage.getItem('currentUser');
-    if (userStr) {
-      const user = JSON.parse(userStr);
-      setCurrentUser(user);
-    }
-  };
-
   useEffect(() => {
+    let unsubscribe = () => {};
     const userStr = localStorage.getItem('currentUser');
     if (!userStr) {
       router.push('/auth');
     } else {
-      setIsAuthenticated(true);
-      setCurrentUser(JSON.parse(userStr));
-      updateWalletInUI();
+        const localUser = JSON.parse(userStr);
+        if (localUser.id) {
+            setIsAuthenticated(true);
+            const db = getDatabase(app);
+            const userRef = ref(db, `users/${localUser.id}`);
+            unsubscribe = onValue(userRef, (snapshot) => {
+                if (snapshot.exists()) {
+                    const dbUser = snapshot.val();
+                    // Merge local and DB user data, ensuring ID is preserved
+                    const mergedUser = { ...localUser, ...dbUser, id: localUser.id };
+                    localStorage.setItem('currentUser', JSON.stringify(mergedUser));
+                    setCurrentUser(mergedUser);
+                } else {
+                    // This case might happen if user is deleted from DB but still in local storage
+                    localStorage.removeItem('currentUser');
+                    router.push('/auth');
+                }
+            });
+        } else {
+            // Invalid user object in local storage
+            localStorage.removeItem('currentUser');
+            router.push('/auth');
+        }
+
       const savedBetAmount = localStorage.getItem('betAmount');
       if (savedBetAmount) {
         setBetAmount(JSON.parse(savedBetAmount));
@@ -58,9 +72,7 @@ export default function Home() {
             setDifficulty(JSON.parse(savedDifficulty));
         }
     }
-    // Listen for changes in local storage from other tabs/windows
-    window.addEventListener('storage', updateWalletInUI);
-    return () => window.removeEventListener('storage', updateWalletInUI);
+    return () => unsubscribe();
   }, [router]);
 
   useEffect(() => {
@@ -72,38 +84,36 @@ export default function Home() {
 
   const updateUserInDbAndLocal = (updates: any) => {
     const userStr = localStorage.getItem('currentUser');
-    if (!userStr) return;
+    if (!userStr) return Promise.reject("No current user found in local storage.");
 
     let user = JSON.parse(userStr);
     const userId = user.id;
-    if (!userId) return;
+    if (!userId) return Promise.reject(new Error("User ID not found in current user data."));
 
-    // Optimistically update local state and localStorage
-    const updatedUser = { ...user, ...updates };
+    const db = getDatabase(app);
+    const userRef = ref(db, `users/${userId}`);
+    const updatedUserForLocal = { ...user, ...updates, id: userId }; // Ensure ID is preserved
+
     Object.keys(updates).forEach(key => {
-        if (typeof updates[key] === 'object' && updates[key] !== null && !Array.isArray(updates[key])) {
-            updatedUser[key] = {...user[key], ...updates[key]};
+        if (typeof updates[key] === 'object' && updates[key] !== null && !Array.isArray(updates[key]) && user[key]) {
+            updatedUserForLocal[key] = {...user[key], ...updates[key]};
         }
     });
 
-    localStorage.setItem('currentUser', JSON.stringify(updatedUser));
-    setCurrentUser(updatedUser); // Update React state to trigger re-render
-
-    // Update Firebase
-    const db = getDatabase(app);
-    const userRef = ref(db, `users/${userId}`);
-    update(userRef, updates).catch(error => {
+    localStorage.setItem('currentUser', JSON.stringify(updatedUserForLocal));
+    setCurrentUser(updatedUserForLocal);
+    
+    return update(userRef, updates).catch(error => {
       console.error("Firebase update failed:", error);
-      // Optional: handle error, maybe revert optimistic update
+      // Revert local state if DB update fails
+      localStorage.setItem('currentUser', JSON.stringify(user));
+      setCurrentUser(user);
     });
   };
 
-  const addTransaction = (type: 'Bet' | 'Win' | 'Deposit' | 'Withdrawal', amount: number, status: 'Completed' | 'Pending' | 'Failed' = 'Completed') => {
-    const userStr = localStorage.getItem('currentUser');
-    if (!userStr) return;
-    const user = JSON.parse(userStr);
-    const userId = user.id;
-    if (!userId) return;
+
+  const addTransaction = async (type: 'Bet' | 'Win' | 'Deposit' | 'Withdrawal', amount: number, status: 'Completed' | 'Pending' | 'Failed' = 'Completed') => {
+    if (!currentUser || !currentUser.id) return;
     
     const newTransaction = {
         date: new Date().toISOString(),
@@ -112,17 +122,12 @@ export default function Home() {
         status,
     };
     
-    const db = getDatabase(app);
-    const transactionRef = push(ref(db, `users/${userId}/transactionHistory`));
-    set(transactionRef, newTransaction);
+    const transactionRef = push(ref(getDatabase(app), `users/${currentUser.id}/transactionHistory`));
+    await set(transactionRef, newTransaction);
   };
 
-  const addBetHistory = (result: 'Win' | 'Loss', bet: number, cashout: number | null, winnings: number) => {
-    const userStr = localStorage.getItem('currentUser');
-    if (!userStr) return;
-    const user = JSON.parse(userStr);
-    const userId = user.id;
-    if (!userId) return;
+  const addBetHistory = async (result: 'Win' | 'Loss', bet: number, cashout: number | null, winnings: number) => {
+    if (!currentUser || !currentUser.id) return;
 
     const newBet = {
         date: new Date().toISOString(),
@@ -132,13 +137,25 @@ export default function Home() {
         result,
     };
     
-    const db = getDatabase(app);
-    const betRef = push(ref(db, `users/${userId}/betHistory`));
-    set(betRef, newBet);
+    const betRef = push(ref(getDatabase(app), `users/${currentUser.id}/betHistory`));
+    await set(betRef, newBet);
   };
 
   const handlePlay = () => {
     if (gameState === 'running' || !currentUser) return;
+    
+    const savedSettings = JSON.parse(localStorage.getItem('adminSettings') || '{}');
+    const minBet = Number(savedSettings.minBet) || 100;
+    const maxBet = Number(savedSettings.maxBet) || 5000;
+
+    if (betAmount < minBet || betAmount > maxBet) {
+      toast({
+        variant: "destructive",
+        title: "Invalid Bet Amount",
+        description: `Your bet must be between ₹${minBet} and ₹${maxBet}.`,
+      })
+      return;
+    }
 
     if (currentUser.wallet < betAmount) {
       toast({
@@ -156,7 +173,6 @@ export default function Home() {
     setMultiplier(1.0);
     setCurrentStep(0);
     
-    const savedSettings = JSON.parse(localStorage.getItem('adminSettings') || '{}');
     let min = 1.01, max = 2.00;
 
     switch(difficulty) {
@@ -187,7 +203,7 @@ export default function Home() {
     
     updateUserInDbAndLocal({ wallet: currentUser.wallet + winnings });
     addTransaction('Win', winnings, 'Completed');
-    addBetHistory('Win', betAmount, parseFloat(multiplier.toFixed(2)), winnings);
+    addBetHistory('Win', parseFloat(multiplier.toFixed(2)), betAmount, winnings);
 
     if (gameIntervalRef.current) clearInterval(gameIntervalRef.current);
     setGameState('finished');
@@ -220,12 +236,14 @@ export default function Home() {
       const startTime = Date.now();
       gameIntervalRef.current = setInterval(() => {
         const elapsedTime = (Date.now() - startTime) / 1000;
-        const newMultiplier = 1 + (elapsedTime * 0.1) + (elapsedTime * elapsedTime * 0.01);
+        // Slower multiplier progression for slow-motion effect
+        const newMultiplier = 1 + (elapsedTime * 0.05) + (elapsedTime * elapsedTime * 0.005);
         
         if (newMultiplier < crashPoint) {
           setMultiplier(newMultiplier);
           setCurrentStep(prev => prev + 1);
         } else {
+          setMultiplier(crashPoint);
           handleGameEnd(true);
         }
       }, GAME_STEP_INTERVAL);
@@ -285,5 +303,3 @@ export default function Home() {
     </div>
   );
 }
-
-    
