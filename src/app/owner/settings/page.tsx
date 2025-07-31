@@ -16,6 +16,8 @@ const defaultSettings = {
     maxBet: '5000',
     minDeposit: '200',
     maxDeposit: '2000',
+    minWithdrawal: '500',
+    maxWithdrawal: '10000',
     difficultyEasyMin: '1.01',
     difficultyEasyMax: '2.00',
     difficultyMediumMin: '1.50',
@@ -139,6 +141,16 @@ export default function GlobalSettingsPage() {
                             <Input id="maxDeposit" value={settings.maxDeposit} onChange={handleInputChange} type="number" />
                         </div>
                     </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="minWithdrawal">Minimum Withdrawal</Label>
+                            <Input id="minWithdrawal" value={settings.minWithdrawal} onChange={handleInputChange} type="number" />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="maxWithdrawal">Maximum Withdrawal</Label>
+                            <Input id="maxWithdrawal" value={settings.maxWithdrawal} onChange={handleInputChange} type="number" />
+                        </div>
+                    </div>
                 </CardContent>
             </Card>
              <Card>
@@ -246,3 +258,5 @@ export default function GlobalSettingsPage() {
     </div>
   )
 }
+
+    
