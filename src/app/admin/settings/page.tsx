@@ -26,11 +26,13 @@ const defaultSettings = {
     siteVersion: '1.0',
     poweredBy: 'yaar tera badmas hai jaanu',
     maintenanceMode: false,
-    withdrawalGate: false,
     gameRules: '1. All players must be over 18 years of age.\n2. Bets can only be placed before the round starts.\n3. Winnings are calculated by multiplying the bet amount by the multiplier at the time of cash-out.\n4. If the game crashes before you cash out, the bet is lost.',
     howToPlay: '1. Select your bet amount.\n2. Choose the game difficulty.\n3. Click "Play" to start the game.\n4. Watch the multiplier increase.\n5. Click "Cash Out" before the game crashes to win.',
     supportInfo: 'For any support queries, please contact us at support@example.com or join our Telegram channel.',
     withdrawalInfo: 'The initial demo amount is not withdrawable. Withdrawals are subject to admin approval. A {fee}% processing fee will be applied to your winnings. You can only make one withdrawal every 24 hours.',
+    upiId: 'admin@upi',
+    upiIdLarge: 'admin-large@upi',
+    kycAutoApproveTime: '5',
 };
 
 export default function SettingsPage() {
@@ -41,6 +43,8 @@ export default function SettingsPage() {
         const savedSettings = localStorage.getItem('adminSettings');
         if (savedSettings) {
             setSettings(prev => ({...prev, ...JSON.parse(savedSettings)}));
+        } else {
+            localStorage.setItem('adminSettings', JSON.stringify(defaultSettings));
         }
     }, []);
 
@@ -100,9 +104,25 @@ export default function SettingsPage() {
                             <Input id="maxDeposit" value={settings.maxDeposit} onChange={handleInputChange} type="number" />
                         </div>
                     </div>
-                    <div className="flex items-center space-x-2 pt-2">
-                        <Switch id="withdrawalGate" checked={settings.withdrawalGate} onCheckedChange={(c) => handleSwitchChange(c, 'withdrawalGate')} />
-                        <Label htmlFor="withdrawalGate">Enable Withdrawal Gate (Require ₹2000 Deposit)</Label>
+                     <div className="space-y-2">
+                        <Label htmlFor="kycAutoApproveTime">KYC Auto-Approve Time (minutes)</Label>
+                        <Input id="kycAutoApproveTime" value={settings.kycAutoApproveTime} onChange={handleInputChange} type="number" />
+                    </div>
+                </CardContent>
+            </Card>
+            <Card>
+                <CardHeader>
+                    <CardTitle>Payment IDs</CardTitle>
+                    <CardDescription>Set the UPI IDs for receiving payments.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                        <Label htmlFor="upiId">Default UPI ID (For deposits up to ₹2000)</Label>
+                        <Input id="upiId" value={settings.upiId} onChange={handleInputChange} placeholder="e.g., yourname@upi" />
+                    </div>
+                    <div className="space-y-2">
+                        <Label htmlFor="upiIdLarge">Large Amount UPI ID (For deposits over ₹2000)</Label>
+                        <Input id="upiIdLarge" value={settings.upiIdLarge} onChange={handleInputChange} placeholder="e.g., business@upi" />
                     </div>
                 </CardContent>
             </Card>
@@ -112,12 +132,10 @@ export default function SettingsPage() {
                     <CardDescription>Set the crash multipliers for each level.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <div className="hidden sm:grid grid-cols-3 gap-4">
-                            <Label>Level</Label>
-                            <Label>Min Multiplier</Label>
-                            <Label>Max Multiplier</Label>
-                        </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
+                        <Label></Label>
+                        <Label className="hidden sm:block">Min Multiplier</Label>
+                        <Label className="hidden sm:block">Max Multiplier</Label>
                     </div>
                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
                         <Label>Easy</Label>
@@ -136,6 +154,8 @@ export default function SettingsPage() {
                     </div>
                 </CardContent>
             </Card>
+        </div>
+        <div className="space-y-6">
              <Card>
                 <CardHeader>
                     <CardTitle>Site Details</CardTitle>
@@ -164,8 +184,6 @@ export default function SettingsPage() {
                     </div>
                 </CardContent>
             </Card>
-        </div>
-        <div className="space-y-6">
              <Card>
                 <CardHeader>
                     <CardTitle>Informational Pages</CardTitle>
