@@ -128,7 +128,7 @@ export default function GameHeader({ onMenuClick, walletBalance, settings }: Gam
       </header>
 
       <DepositModal isOpen={activeModal === 'deposit'} onOpenChange={(open) => !open && setActiveModal(null)} settings={settings} />
-      <WithdrawModal isOpen={activeModal === 'withdraw'} onOpenChange={(open) => !open && setActiveModal(null)} settings={settings} />
+      <WithdrawModal isOpen={activeModal === 'withdraw'} onOpenChange={(open) => !open && setActiveModal(null)} settings={settings} currentUser={null} />
        <style jsx global>{`
         @keyframes scroll-h {
           0% {
