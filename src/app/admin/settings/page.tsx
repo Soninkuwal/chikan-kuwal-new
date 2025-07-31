@@ -8,34 +8,34 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from '@/hooks/use-toast';
-import { getDatabase, ref, get, set } from 'firebase/database';
+import { getDatabase, ref, onValue, set } from 'firebase/database';
 import { app } from '@/lib/firebase';
 
 const defaultSettings = {
     minBet: '100',
     maxBet: '5000',
-    minDeposit: '200',
-    maxDeposit: '2000',
     minWithdraw: '500',
     maxWithdraw: '10000',
     withdrawalFee: '10',
+    minDeposit: '200',
+    maxDeposit: '2000',
     difficultyEasyMin: '1.01',
     difficultyEasyMax: '2.00',
     difficultyMediumMin: '1.50',
     difficultyMediumMax: '5.00',
     difficultyHardMin: '2.00',
     difficultyHardMax: '10.00',
-    kycAutoApproveTime: '0',
     siteTitle: 'Chicken Road Riches',
     siteIcon: 'https://chickenroad.rajmines.com/images/chicken.png',
     siteVersion: '1.0',
     poweredBy: 'yaar tera badmas hai jaanu',
     maintenanceMode: false,
     withdrawalGate: false,
-    gameRules: '1. All players must be over 18 years of age.\n2. Bets can only be placed before the round starts.\n3. Winnings are calculated by multiplying the bet amount by the multiplier at the time of cash-out.\n4. If the game crashes before you cash out, the bet is lost.',
-    howToPlay: '1. Select your bet amount.\n2. Choose the game difficulty.\n3. Click "Play" to start the game.\n4. Watch the multiplier increase.\n5. Click "Cash Out" before the game crashes to win.',
+    gameRules: '1. All players must be over 18 years of age.\\n2. Bets can only be placed before the round starts.\\n3. Winnings are calculated by multiplying the bet amount by the multiplier at the time of cash-out.\\n4. If the game crashes before you cash out, the bet is lost.',
+    howToPlay: '1. Select your bet amount.\\n2. Choose the game difficulty.\\n3. Click "Play" to start the game.\\n4. Watch the multiplier increase.\\n5. Click "Cash Out" before the game crashes to win.',
     supportInfo: 'For any support queries, please contact us at support@example.com or join our Telegram channel.',
     withdrawalInfo: 'The initial demo amount is not withdrawable. Withdrawals are subject to admin approval. A {fee}% processing fee will be applied to your winnings. You can only make one withdrawal every 24 hours.',
+    kycAutoApproveTime: '0',
 };
 
 export default function SettingsPage() {
@@ -45,13 +45,19 @@ export default function SettingsPage() {
     useEffect(() => {
         const db = getDatabase(app);
         const settingsRef = ref(db, 'settings');
-        get(settingsRef).then((snapshot) => {
+        const listener = onValue(settingsRef, (snapshot) => {
             if (snapshot.exists()) {
                 const dbSettings = snapshot.val();
                 setSettings(prev => ({...prev, ...dbSettings}));
-                localStorage.setItem('adminSettings', JSON.stringify(dbSettings));
+            } else {
+                // If no settings in DB, initialize with defaults
+                set(settingsRef, defaultSettings);
             }
         });
+
+        return () => {
+            settingsRef.off('value', listener);
+        };
     }, []);
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -66,14 +72,20 @@ export default function SettingsPage() {
     const handleSave = () => {
         const db = getDatabase(app);
         const settingsRef = ref(db, 'settings');
-        set(settingsRef, settings).then(() => {
-            localStorage.setItem('adminSettings', JSON.stringify(settings));
-            toast({
-                title: "Settings Saved",
-                description: "All admin settings have been updated successfully and saved to the database.",
+        set(settingsRef, settings)
+            .then(() => {
+                toast({
+                    title: "Settings Saved",
+                    description: "All admin settings have been updated successfully.",
+                });
+            })
+            .catch(error => {
+                toast({
+                    variant: 'destructive',
+                    title: "Save Failed",
+                    description: `Could not save settings to the database. Error: ${error.message}`,
+                });
             });
-            window.dispatchEvent(new StorageEvent('storage', { key: 'adminSettings' }));
-        });
     };
 
   return (
@@ -100,6 +112,10 @@ export default function SettingsPage() {
                             <Input id="maxBet" value={settings.maxBet} onChange={handleInputChange} type="number" />
                         </div>
                     </div>
+                     <div className="space-y-2">
+                        <Label htmlFor="withdrawalFee">Withdrawal Fee (%)</Label>
+                        <Input id="withdrawalFee" value={settings.withdrawalFee} onChange={handleInputChange} type="number" />
+                    </div>
                     <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <Label htmlFor="minDeposit">Minimum Deposit</Label>
@@ -110,19 +126,15 @@ export default function SettingsPage() {
                             <Input id="maxDeposit" value={settings.maxDeposit} onChange={handleInputChange} type="number" />
                         </div>
                     </div>
-                     <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
-                            <Label htmlFor="minWithdraw">Minimum Withdraw</Label>
+                            <Label htmlFor="minWithdraw">Minimum Withdrawal</Label>
                             <Input id="minWithdraw" value={settings.minWithdraw} onChange={handleInputChange} type="number" />
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor="maxWithdraw">Maximum Withdraw</Label>
+                            <Label htmlFor="maxWithdraw">Maximum Withdrawal</Label>
                             <Input id="maxWithdraw" value={settings.maxWithdraw} onChange={handleInputChange} type="number" />
                         </div>
-                    </div>
-                     <div className="space-y-2">
-                        <Label htmlFor="withdrawalFee">Withdrawal Fee (%)</Label>
-                        <Input id="withdrawalFee" value={settings.withdrawalFee} onChange={handleInputChange} type="number" />
                     </div>
                     <div className="flex items-center space-x-2 pt-2">
                         <Switch id="withdrawalGate" checked={settings.withdrawalGate} onCheckedChange={(c) => handleSwitchChange(c, 'withdrawalGate')} />
@@ -132,11 +144,15 @@ export default function SettingsPage() {
             </Card>
              <Card>
                 <CardHeader>
-                    <CardTitle>Game Difficulty & Automation</CardTitle>
-                    <CardDescription>Set multipliers and automation rules.</CardDescription>
+                    <CardTitle>Game Difficulty</CardTitle>
+                    <CardDescription>Set the crash multipliers for each level.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    <Label className='text-base'>Game Difficulty</Label>
+                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
+                        <Label>Level</Label>
+                        <Label>Min Multiplier</Label>
+                        <Label>Max Multiplier</Label>
+                    </div>
                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
                         <Label>Easy</Label>
                         <Input id="difficultyEasyMin" value={settings.difficultyEasyMin} onChange={handleInputChange} type="number" placeholder="Min"/>
@@ -152,12 +168,17 @@ export default function SettingsPage() {
                         <Input id="difficultyHardMin" value={settings.difficultyHardMin} onChange={handleInputChange} type="number" placeholder="Min"/>
                         <Input id="difficultyHardMax" value={settings.difficultyHardMax} onChange={handleInputChange} type="number" placeholder="Max"/>
                     </div>
-                    <div className="border-t pt-4 space-y-2">
-                        <Label className="text-base">KYC Automation</Label>
-                        <div>
-                            <Label htmlFor="kycAutoApproveTime">KYC Auto-Approve Time (minutes)</Label>
-                            <Input id="kycAutoApproveTime" value={settings.kycAutoApproveTime} onChange={handleInputChange} type="number" placeholder="0 for instant" />
-                        </div>
+                </CardContent>
+            </Card>
+            <Card>
+                <CardHeader>
+                    <CardTitle>KYC Settings</CardTitle>
+                    <CardDescription>Configure KYC verification rules.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                        <Label htmlFor="kycAutoApproveTime">KYC Auto-Approve Time (minutes)</Label>
+                        <Input id="kycAutoApproveTime" value={settings.kycAutoApproveTime} onChange={handleInputChange} type="number" placeholder="0 for instant" />
                     </div>
                 </CardContent>
             </Card>
