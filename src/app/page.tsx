@@ -10,7 +10,8 @@ import { useToast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Skeleton } from '@/components/ui/skeleton';
 import { app } from '@/lib/firebase';
-import { getDatabase, ref, update, push, set, onValue } from 'firebase/database';
+import { getDatabase, ref, update, push, set, onValue, off } from 'firebase/database';
+import BottomNavBar from '@/components/game/BottomNavBar';
 
 export type GameState = 'ready' | 'running' | 'finished';
 export type Difficulty = 'easy' | 'medium' | 'hard';
@@ -18,9 +19,11 @@ const GAME_STEP_INTERVAL = 1000; // ms per step
 
 export default function Home() {
   const router = useRouter();
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const { toast } = useToast();
+  const isMobile = useIsMobile();
+  
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const [settings, setSettings] = useState<any>({});
+  const [settings, setSettings] = useState<any>(null);
   const [isSidebarOpen, setSidebarOpen] = useState(false);
   const [gameState, setGameState] = useState<GameState>('ready');
   const [betAmount, setBetAmount] = useState<number>(100);
@@ -29,116 +32,95 @@ export default function Home() {
   const [crashPoint, setCrashPoint] = useState<number | null>(null);
   const [currentStep, setCurrentStep] = useState(0);
 
-  const { toast } = useToast();
-  const isMobile = useIsMobile();
   const gameIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  
-  const updateUserAndSettings = useCallback(() => {
-    // Fetch Settings and store in local storage
-    const db = getDatabase(app);
-    const settingsRef = ref(db, 'settings');
-    onValue(settingsRef, (snapshot) => {
-        if (snapshot.exists()) {
-            const dbSettings = snapshot.val();
-            setSettings(dbSettings);
-            localStorage.setItem('adminSettings', JSON.stringify(dbSettings));
-        }
-    }, { onlyOnce: true });
-
-    // Fetch user and update UI
-    const userStr = localStorage.getItem('currentUser');
-    if (userStr) {
-        const user = JSON.parse(userStr);
-        if(user.id) {
-            const userRef = ref(db, `users/${user.id}`);
-            onValue(userRef, (snapshot) => {
-                if(snapshot.exists()){
-                    const dbUser = snapshot.val();
-                    setCurrentUser(dbUser);
-                    localStorage.setItem('currentUser', JSON.stringify(dbUser));
-                }
-            });
-        } else {
-             router.push('/auth');
-        }
-    } else {
-        router.push('/auth');
-    }
-  }, [router]);
 
   useEffect(() => {
+    // This effect runs once on component mount on the client side.
+    const db = getDatabase(app);
+    let settingsListener: any;
+    let userListener: any;
+
+    // Fetch settings first
+    const settingsRef = ref(db, 'settings');
+    settingsListener = onValue(settingsRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const dbSettings = snapshot.val();
+        setSettings(dbSettings);
+        // We can store settings in localStorage for faster initial loads on subsequent visits,
+        // but the primary source is always Firebase.
+        localStorage.setItem('adminSettings', JSON.stringify(dbSettings));
+      }
+    });
+
+    // Check for logged-in user and fetch their data
     const userStr = localStorage.getItem('currentUser');
     if (!userStr) {
       router.push('/auth');
-    } else {
-      setIsAuthenticated(true);
-      updateUserAndSettings(); // Initial fetch
-      
-      const savedBetAmount = localStorage.getItem('betAmount');
-      if (savedBetAmount) setBetAmount(JSON.parse(savedBetAmount));
-      
-      const savedDifficulty = localStorage.getItem('difficulty');
-      if (savedDifficulty) setDifficulty(JSON.parse(savedDifficulty));
+      return; // Stop execution if no user
     }
-    
-    // Listen for storage changes from other tabs/windows
-    window.addEventListener('storage', updateUserAndSettings);
 
-    return () => {
-        window.removeEventListener('storage', updateUserAndSettings);
-        // Detach Firebase listeners if any were attached for real-time updates in updateUserAndSettings
-        const db = getDatabase(app);
-        const userStr = localStorage.getItem('currentUser');
-        if (userStr) {
-            const user = JSON.parse(userStr);
-            if (user.id) {
-                const userRef = ref(db, `users/${user.id}`);
-                userRef.off();
-            }
-        }
+    const localUser = JSON.parse(userStr);
+    if (!localUser || !localUser.id) {
+      router.push('/auth');
+      return; // Stop execution if user data is invalid
     }
-  }, [router, updateUserAndSettings]);
+
+    // Set user from local storage first for a faster UI update
+    setCurrentUser(localUser);
+
+    // Then, listen for real-time updates from Firebase for that user
+    const userRef = ref(db, `users/${localUser.id}`);
+    userListener = onValue(userRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const dbUser = snapshot.val();
+        setCurrentUser(dbUser);
+        localStorage.setItem('currentUser', JSON.stringify(dbUser));
+      }
+    });
+
+    // Load bet and difficulty from localStorage
+    const savedBetAmount = localStorage.getItem('betAmount');
+    if (savedBetAmount) setBetAmount(JSON.parse(savedBetAmount));
+      
+    const savedDifficulty = localStorage.getItem('difficulty');
+    if (savedDifficulty) setDifficulty(JSON.parse(savedDifficulty));
+
+    // Cleanup function to detach listeners when the component unmounts
+    return () => {
+      if (settingsListener) off(settingsRef, 'value', settingsListener);
+      if (userListener) off(userRef, 'value', userListener);
+    };
+  }, [router]);
 
   useEffect(() => {
-    if (isAuthenticated) {
+    // This effect saves bet and difficulty to localStorage whenever they change.
+    if (currentUser && settings) {
         localStorage.setItem('betAmount', JSON.stringify(betAmount));
         localStorage.setItem('difficulty', JSON.stringify(difficulty));
     }
-  }, [betAmount, difficulty, isAuthenticated]);
+  }, [betAmount, difficulty, currentUser, settings]);
+
 
   const updateUserInDbAndLocal = async (updates: any) => {
-    const userStr = localStorage.getItem('currentUser');
-    if (!userStr) return Promise.reject(new Error("Current user not found in local storage."));
-
-    let user = JSON.parse(userStr);
-    const userId = user.id;
-    if (!userId) return Promise.reject(new Error("User ID not found in current user data."));
+    if (!currentUser || !currentUser.id) {
+      toast({ variant: 'destructive', title: 'Error', description: 'User not found. Please log in again.' });
+      router.push('/auth');
+      return Promise.reject(new Error("User ID not found in current user data."));
+    }
     
     const db = getDatabase(app);
-    const userRef = ref(db, `users/${userId}`);
+    const userRef = ref(db, `users/${currentUser.id}`);
     
-    // Merge updates with the existing user data to avoid overwriting nested objects
-    const updatedUser = {...user};
-    Object.keys(updates).forEach(key => {
-        if (typeof updates[key] === 'object' && updates[key] !== null && !Array.isArray(updates[key]) && updatedUser[key]) {
-            updatedUser[key] = {...updatedUser[key], ...updates[key]};
-        } else {
-            updatedUser[key] = updates[key];
-        }
-    });
-
-    localStorage.setItem('currentUser', JSON.stringify(updatedUser));
+    // Optimistically update local state for a snappier UI
+    const updatedUser = { ...currentUser, ...updates };
     setCurrentUser(updatedUser);
+    localStorage.setItem('currentUser', JSON.stringify(updatedUser));
     
     return update(userRef, updates);
-};
+  };
 
   const addTransaction = (type: 'Bet' | 'Win' | 'Deposit' | 'Withdrawal', amount: number, status: 'Completed' | 'Pending' | 'Failed' = 'Completed') => {
-    const userStr = localStorage.getItem('currentUser');
-    if (!userStr) return;
-    const user = JSON.parse(userStr);
-    const userId = user.id;
-    if (!userId) return;
+    if (!currentUser || !currentUser.id) return;
     
     const newTransaction = {
         date: new Date().toISOString(),
@@ -148,16 +130,12 @@ export default function Home() {
     };
     
     const db = getDatabase(app);
-    const transactionRef = push(ref(db, `users/${userId}/transactionHistory`));
+    const transactionRef = push(ref(db, `users/${currentUser.id}/transactionHistory`));
     set(transactionRef, newTransaction);
   };
 
   const addBetHistory = (result: 'Win' | 'Loss', bet: number, cashout: number | null, winnings: number) => {
-    const userStr = localStorage.getItem('currentUser');
-    if (!userStr) return;
-    const user = JSON.parse(userStr);
-    const userId = user.id;
-    if (!userId) return;
+    if (!currentUser || !currentUser.id) return;
 
     const newBet = {
         date: new Date().toISOString(),
@@ -168,12 +146,12 @@ export default function Home() {
     };
     
     const db = getDatabase(app);
-    const betRef = push(ref(db, `users/${userId}/betHistory`));
+    const betRef = push(ref(db, `users/${currentUser.id}/betHistory`));
     set(betRef, newBet);
   };
 
   const handlePlay = () => {
-    if (gameState === 'running' || !currentUser || !settings.minBet) return;
+    if (gameState === 'running' || !currentUser || !settings) return;
     
     const minBet = parseFloat(settings.minBet);
     const maxBet = parseFloat(settings.maxBet);
@@ -297,7 +275,8 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameState, crashPoint]);
 
-  if (!isAuthenticated || !currentUser || !settings.siteTitle) {
+  // Show a loading screen until both user and settings are loaded.
+  if (!currentUser || !settings) {
       return (
         <div className="flex h-screen w-full flex-col items-center justify-center bg-background p-4">
             <div className="space-y-4 w-full max-w-lg">
@@ -334,10 +313,10 @@ export default function Home() {
       <Sidebar 
         isOpen={isSidebarOpen} 
         onOpenChange={setSidebarOpen} 
-        walletBalance={currentUser.wallet}
+        currentUser={currentUser}
         settings={settings}
       />
-      {isMobile && <BottomNavBar onMenuClick={() => setSidebarOpen(true)} />}
+      {isMobile && <BottomNavBar onMenuClick={() => setSidebarOpen(true)} currentUser={currentUser} />}
     </div>
   );
 }
