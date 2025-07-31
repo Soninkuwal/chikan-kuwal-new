@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button"
 import { Check, X } from "lucide-react"
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -61,10 +60,6 @@ export default function DepositRequestsPage() {
     const db = getDatabase(app);
     const requestRef = ref(db, `depositRequests/${request.id}`);
     
-    // Optimistically remove from UI, though Firebase listener will handle it
-    setRequests(prev => prev.filter(req => req.id !== request.id));
-    
-    // Remove the request from the pending list in Firebase
     await remove(requestRef);
 
     if (status === 'approved') {
@@ -73,17 +68,17 @@ export default function DepositRequestsPage() {
 
         if (snapshot.exists()) {
             let userToUpdate: any = null;
-            let userIdToUpdate: string | null = null;
+            let userKeyToUpdate: string | null = null;
             snapshot.forEach((childSnapshot) => {
                 if (childSnapshot.val().id === request.userId) {
                     userToUpdate = childSnapshot.val();
-                    userIdToUpdate = childSnapshot.key;
+                    userKeyToUpdate = childSnapshot.key;
                 }
             });
 
-            if (userToUpdate && userIdToUpdate) {
+            if (userToUpdate && userKeyToUpdate) {
                 const newBalance = (userToUpdate.wallet || 0) + parseFloat(request.amount.replace('₹', ''));
-                await update(ref(db, `users/${userIdToUpdate}`), { wallet: newBalance });
+                await update(ref(db, `users/${userKeyToUpdate}`), { wallet: newBalance });
                 
                 toast({ title: 'Request Approved', description: `${request.user}'s wallet has been updated.`});
             } else {
