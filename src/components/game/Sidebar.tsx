@@ -247,6 +247,7 @@ export function Sidebar({
             documentNumber: aadhaarNumber,
             documentImage: documentImage,
             date: new Date().toLocaleString(),
+            createdAt: Date.now(),
         };
 
         const db = getDatabase(app);
