@@ -25,19 +25,13 @@ type ModalProps = {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
   feeType?: 'user' | 'owner' | 'none';
+  settings: any;
 };
 
-export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalProps) {
+export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user', settings }: ModalProps) {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('upi');
   const [amount, setAmount] = useState<number | string>('');
-  const [settings, setSettings] = useState({
-      withdrawalFee: '10',
-      ownerFee: '2',
-      minWithdraw: '500',
-      maxWithdraw: '10000',
-      withdrawalInfo: 'The initial demo amount is not withdrawable. Withdrawals are subject to admin approval. A {fee}% processing fee will be applied to your winnings. You can only make one withdrawal every 24 hours.'
-  });
   const [kycStatus, setKycStatus] = useState('Not Verified');
   const [currentUser, setCurrentUser] = useState<any>(null);
 
@@ -52,11 +46,10 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
   useEffect(() => {
     let unsubscribe = () => {};
     if (isOpen) {
-      const savedSettings = JSON.parse(localStorage.getItem('adminSettings') || '{}');
-      setSettings(prev => ({...prev, ...savedSettings}));
-
       const localUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-      if (localUser.id) {
+      setCurrentUser(localUser);
+      
+      if (localUser.id && feeType === 'user') {
           const db = getDatabase(app);
           const userRef = ref(db, `users/${localUser.id}`);
 
@@ -70,7 +63,12 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
       }
     }
     return () => unsubscribe();
-  }, [isOpen]);
+  }, [isOpen, feeType]);
+
+  const fee = feeType === 'user' ? parseFloat(settings?.withdrawalFee || '10') : (feeType === 'owner' ? parseFloat(settings?.ownerFee || '2') : 0);
+  const withdrawalInfo = settings?.withdrawalInfo || 'Default withdrawal info text.';
+  const minWithdraw = parseFloat(settings?.minWithdraw || '500');
+  const maxWithdraw = parseFloat(settings?.maxWithdraw || '10000');
 
 
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -78,7 +76,7 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
   }
 
   const handleSubmit = async () => {
-    if (kycStatus !== 'Verified') {
+    if (feeType === 'user' && kycStatus !== 'Verified') {
         toast({ variant: 'destructive', title: 'KYC Not Verified', description: 'Please complete your KYC verification to enable withdrawals.' });
         return;
     }
@@ -91,9 +89,15 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
       return;
     }
 
-     if (numericAmount < Number(settings.minWithdraw) || numericAmount > Number(settings.maxWithdraw)) {
-      toast({ variant: 'destructive', title: 'Invalid Amount', description: `Withdrawal amount must be between ₹${settings.minWithdraw} and ₹${settings.maxWithdraw}.` });
-      return;
+    if (feeType === 'user') {
+        if (numericAmount < minWithdraw) {
+            toast({ variant: 'destructive', title: 'Amount Too Low', description: `Minimum withdrawal amount is ₹${minWithdraw}.` });
+            return;
+        }
+        if (numericAmount > maxWithdraw) {
+            toast({ variant: 'destructive', title: 'Amount Too High', description: `Maximum withdrawal amount is ₹${maxWithdraw}.` });
+            return;
+        }
     }
 
     if (isUpi && !upiId) {
@@ -106,22 +110,25 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
       return;
     }
 
-    if (!currentUser || currentUser.wallet < numericAmount) {
+    if (feeType === 'user' && (!currentUser || currentUser.wallet < numericAmount)) {
       toast({ variant: 'destructive', title: 'Insufficient Funds', description: 'You do not have enough funds to make this withdrawal.' });
       return;
     }
-
-    // Deduct from wallet immediately
-    const newWalletBalance = currentUser.wallet - numericAmount;
+    
     const db = getDatabase(app);
-    await update(ref(db, `users/${currentUser.id}`), { wallet: newWalletBalance });
+    
+    if(feeType === 'user') {
+        // Deduct from wallet immediately
+        const newWalletBalance = currentUser.wallet - numericAmount;
+        await update(ref(db, `users/${currentUser.id}`), { wallet: newWalletBalance });
+    }
 
     const newRequest = {
-        userId: currentUser.id,
-        user: currentUser.name,
+        userId: currentUser?.id || 'admin/owner',
+        user: currentUser?.name || 'Admin/Owner',
         amount: `₹${numericAmount.toFixed(2)}`,
         method: isUpi ? `UPI (${upiId})` : `Bank Transfer: Name: ${accountName}, Acct: ${accountNumber}, IFSC: ${ifscCode}`,
-        date: new Date().toLocaleString(),
+        date: new Date().toISOString(),
     };
 
     const requestsRef = ref(db, 'withdrawalRequests');
@@ -136,8 +143,7 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
   }
 
   const numericAmount = Number(amount);
-  const feePercent = feeType === 'owner' ? Number(settings.ownerFee) : Number(settings.withdrawalFee);
-  const feeAmount = numericAmount * (feePercent / 100);
+  const feeAmount = numericAmount * (fee / 100);
   const receivedAmount = numericAmount - feeAmount;
 
   return (
@@ -151,7 +157,7 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
         </DialogHeader>
         <ScrollArea className="max-h-[70vh] pr-6">
             <div className="space-y-4">
-                {kycStatus !== 'Verified' ? (
+                {feeType === 'user' && kycStatus !== 'Verified' ? (
                      <Alert variant="destructive">
                         <ShieldAlert className="h-4 w-4"/>
                         <AlertTitle>Withdrawals Locked</AlertTitle>
@@ -164,19 +170,19 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
                         {feeType === 'user' && (
                         <Alert className="border-primary/50 text-primary [&>svg]:text-primary whitespace-pre-wrap">
                             <Info className="h-4 w-4" />
-                            <AlertTitle>Please Note</AlertTitle>
+                            <AlertTitle>Withdrawal Policy</AlertTitle>
                             <AlertDescription>
-                            {settings.withdrawalInfo.replace('{fee}', String(settings.withdrawalFee))}
+                            {`Min: ₹${minWithdraw} | Max: ₹${maxWithdraw}\\n${withdrawalInfo.replace('{fee}', String(fee))}`}
                             </AlertDescription>
                         </Alert>
                         )}
                         <div className="space-y-2">
-                            <Label htmlFor="withdraw-amount">Amount (₹{settings.minWithdraw} - ₹{settings.maxWithdraw})</Label>
+                            <Label htmlFor="withdraw-amount">Amount</Label>
                             <Input id="withdraw-amount" placeholder="Enter amount" type="number" value={amount} onChange={handleAmountChange} />
                         </div>
-                        {numericAmount > 0 && feePercent > 0 && (
+                        {numericAmount > 0 && fee > 0 && (
                             <div className="p-3 bg-secondary rounded-md text-sm space-y-2">
-                                <div className="flex justify-between"><span>Processing Fee ({feePercent}%):</span> <span className="font-medium">- ₹{ feeAmount.toFixed(2) }</span></div>
+                                <div className="flex justify-between"><span>Processing Fee ({fee}%):</span> <span className="font-medium">- ₹{ feeAmount.toFixed(2) }</span></div>
                                 <div className="flex justify-between font-bold mt-2 pt-2 border-t border-border"><span>You will receive:</span> <span>₹{ receivedAmount.toFixed(2) }</span></div>
                             </div>
                         )}
@@ -216,7 +222,7 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
             type="submit" 
             className="w-full h-12 bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-lg" 
             onClick={handleSubmit}
-            disabled={kycStatus !== 'Verified'}
+            disabled={feeType === 'user' && kycStatus !== 'Verified'}
           >
             Request Withdrawal
           </Button>
