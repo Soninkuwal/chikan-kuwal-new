@@ -49,7 +49,7 @@ import { getDatabase, ref, onValue, off, update, push, set } from "firebase/data
 type SidebarProps = {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
-  walletBalance: number;
+  currentUser: any;
   settings: any;
 };
 
@@ -63,20 +63,20 @@ const ownerChatInitialMessages = [
 export function Sidebar({ 
   isOpen, 
   onOpenChange,
-  walletBalance,
+  currentUser,
   settings
 }: SidebarProps) {
   const router = useRouter();
+  const { toast } = useToast();
+
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [chatTarget, setChatTarget] = useState<'admin' | 'owner' | null>(null);
-  const { toast } = useToast();
-  const [currentUser, setCurrentUser] = useState<any>({ name: 'User', email: 'user@example.com', avatar: '', avatarFallback: 'U', transactionHistory: [], betHistory: [] });
-  const [tempUsername, setTempUsername] = useState('');
+  const [tempUsername, setTempUsername] = useState(currentUser?.name || '');
   const [isEditingProfile, setIsEditingProfile] = useState(false);
-
   const [aadhaarNumber, setAadhaarNumber] = useState('');
   const [aadhaarFile, setAadhaarFile] = useState<File | null>(null);
 
+  const walletBalance = currentUser?.wallet ?? 0;
   const poweredBy = settings?.poweredBy || 'yaar tera badmas hai jaanu';
   const infoContent = {
       gameRules: settings?.gameRules || 'No rules defined yet.',
@@ -84,50 +84,17 @@ export function Sidebar({
       supportInfo: settings?.supportInfo || 'No support info defined yet.',
   };
 
-  const updateSidebarData = useCallback(() => {
-    const userStr = localStorage.getItem('currentUser');
-    if (!userStr) return () => {};
-    
-    const localUser = JSON.parse(userStr);
-    const userId = localUser.id;
-    if (!userId) return () => {};
-
-    const db = getDatabase(app);
-    const userRef = ref(db, `users/${userId}`);
-
-    const listener = onValue(userRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const dbUser = snapshot.val();
-        
-        const mergedUser = { ...localUser, ...dbUser };
-        localStorage.setItem('currentUser', JSON.stringify(mergedUser));
-
-        const transactionHistory = dbUser.transactionHistory ? Object.values(dbUser.transactionHistory).sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime()) : [];
-        const betHistory = dbUser.betHistory ? Object.values(dbUser.betHistory).sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime()) : [];
-        
-        setCurrentUser({
-            ...mergedUser,
-            avatar: mergedUser.avatar || `https://placehold.co/100x100.png?text=${(mergedUser.name || 'U').charAt(0).toUpperCase()}`,
-            avatarFallback: (mergedUser.name || 'U').charAt(0).toUpperCase(),
-            transactionHistory,
-            betHistory,
-        });
-      }
-    });
-
-     return () => off(userRef, 'value', listener);
-  }, []);
-
   useEffect(() => {
-    let unsubscribe: () => void = () => {};
-    if (isOpen) {
-      unsubscribe = updateSidebarData();
+    if (isOpen && currentUser) {
+      setTempUsername(currentUser.name);
     }
-    return () => unsubscribe();
-  }, [isOpen, updateSidebarData]);
+  }, [isOpen, currentUser]);
 
   const handleLogout = () => {
     localStorage.removeItem('currentUser');
+    localStorage.removeItem('adminSettings');
+    localStorage.removeItem('betAmount');
+    localStorage.removeItem('difficulty');
     onOpenChange(false);
     router.push('/auth');
   }
@@ -154,9 +121,7 @@ export function Sidebar({
 
   const handleMenuClick = (modal: string) => {
     onOpenChange(false);
-    setTimeout(() => {
-        setActiveModal(modal);
-    }, 200);
+    setTimeout(() => setActiveModal(modal), 200);
   }
 
   const handleChatClick = () => {
@@ -171,18 +136,13 @@ export function Sidebar({
   }
 
   const handleSaveProfile = () => {
-    const userStr = localStorage.getItem('currentUser');
-    if(!userStr) return;
-    const user = JSON.parse(userStr);
-    const userId = user.id;
+    if (!currentUser?.id) return;
+    const userId = currentUser.id;
 
     const updates = { name: tempUsername };
     const db = getDatabase(app);
     update(ref(db, `users/${userId}`), updates)
       .then(() => {
-        const updatedUser = { ...user, ...updates };
-        localStorage.setItem('currentUser', JSON.stringify(updatedUser));
-        setCurrentUser((prev: any) => ({...prev, name: tempUsername}));
         toast({title: "Profile Updated!", description: "Your username has been changed."});
         setIsEditingProfile(false);
       })
@@ -194,22 +154,16 @@ export function Sidebar({
 
   const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (file) {
+      if (file && currentUser?.id) {
           const reader = new FileReader();
           reader.onloadend = () => {
               const newAvatar = reader.result as string;
-              const userStr = localStorage.getItem('currentUser');
-              if(!userStr) return;
-              const user = JSON.parse(userStr);
-              const userId = user.id;
+              const userId = currentUser.id;
               
               const updates = { avatar: newAvatar };
               const db = getDatabase(app);
               update(ref(db, `users/${userId}`), updates)
                 .then(() => {
-                  const updatedUser = { ...user, ...updates };
-                  localStorage.setItem('currentUser', JSON.stringify(updatedUser));
-                  setCurrentUser((prev: any) => ({...prev, avatar: newAvatar}));
                   toast({title: "Avatar Updated!", description: "Your new avatar has been set."});
                 })
                 .catch(error => {
@@ -226,6 +180,7 @@ export function Sidebar({
         toast({ variant: 'destructive', title: 'Incomplete Information', description: 'Please provide Aadhaar number and upload the document.'});
         return;
     }
+    if (!currentUser?.id) return;
 
     const reader = new FileReader();
     reader.onloadend = () => {
@@ -256,6 +211,10 @@ export function Sidebar({
     reader.readAsDataURL(aadhaarFile);
   }
 
+  const transactionHistory = currentUser?.transactionHistory ? Object.values(currentUser.transactionHistory).sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime()) : [];
+  const betHistory = currentUser?.betHistory ? Object.values(currentUser.betHistory).sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime()) : [];
+  const userAvatar = currentUser?.avatar || `https://placehold.co/100x100.png?text=${(currentUser?.name || 'U').charAt(0).toUpperCase()}`;
+  const userAvatarFallback = (currentUser?.name || 'U').charAt(0).toUpperCase();
 
   const getModalContent = () => {
     if (activeModal === 'chat') {
@@ -268,8 +227,8 @@ export function Sidebar({
         )
     }
      if (activeModal === 'chat_interface') {
-        if(chatTarget === 'admin') return <ChatInterface initialMessages={adminChatInitialMessages} storageKey="userAdminChatMessages" currentUser={{name: currentUser.name, avatar: currentUser.avatarFallback}} chatWith="Admin" />;
-        if(chatTarget === 'owner') return <ChatInterface initialMessages={ownerChatInitialMessages} storageKey="userOwnerChatMessages" currentUser={{name: currentUser.name, avatar: currentUser.avatarFallback}} chatWith="Owner"/>;
+        if(chatTarget === 'admin') return <ChatInterface initialMessages={adminChatInitialMessages} storageKey="userAdminChatMessages" currentUser={{name: currentUser.name, avatar: userAvatarFallback}} chatWith="Admin" />;
+        if(chatTarget === 'owner') return <ChatInterface initialMessages={ownerChatInitialMessages} storageKey="userOwnerChatMessages" currentUser={{name: currentUser.name, avatar: userAvatarFallback}} chatWith="Owner"/>;
     }
      if (activeModal === 'profile') {
         return (
@@ -277,8 +236,8 @@ export function Sidebar({
                 <div className="flex flex-col items-center gap-4">
                      <div className="relative group">
                         <Avatar className="h-24 w-24 border-4 border-primary">
-                            <AvatarImage src={currentUser.avatar} alt={currentUser.name} />
-                            <AvatarFallback>{currentUser.avatarFallback}</AvatarFallback>
+                            <AvatarImage src={userAvatar} alt={currentUser.name} />
+                            <AvatarFallback>{userAvatarFallback}</AvatarFallback>
                         </Avatar>
                         <Label htmlFor="avatar-upload" className="absolute inset-0 bg-black/50 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 cursor-pointer rounded-full transition-opacity">
                             <Upload className="h-6 w-6" />
@@ -388,7 +347,7 @@ export function Sidebar({
                     </TableRow>
                 </TableHeader>
                 <TableBody>
-                    {currentUser.transactionHistory && currentUser.transactionHistory.length > 0 ? currentUser.transactionHistory.map((tx: any, index: number) => (
+                    {transactionHistory.length > 0 ? transactionHistory.map((tx: any, index: number) => (
                         <TableRow key={index}>
                             <TableCell className="text-xs">{new Date(tx.date).toLocaleString()}</TableCell>
                             <TableCell>{tx.type}</TableCell>
@@ -419,7 +378,7 @@ export function Sidebar({
                     </TableRow>
                 </TableHeader>
                 <TableBody>
-                    {currentUser.betHistory && currentUser.betHistory.length > 0 ? currentUser.betHistory.map((bet: any, index: number) => (
+                    {betHistory.length > 0 ? betHistory.map((bet: any, index: number) => (
                         <TableRow key={index}>
                             <TableCell className="text-xs">{new Date(bet.date).toLocaleString()}</TableCell>
                             <TableCell>₹{bet.bet.toFixed(2)}</TableCell>
@@ -456,11 +415,11 @@ export function Sidebar({
             <SheetHeader className="p-6 text-left">
               <div className="flex items-center gap-4">
                 <Avatar className="h-16 w-16 border-4 border-primary">
-                  <AvatarImage src={currentUser.avatar} alt={currentUser.name} />
-                  <AvatarFallback>{currentUser.avatarFallback}</AvatarFallback>
+                  <AvatarImage src={userAvatar} alt={currentUser?.name} />
+                  <AvatarFallback>{userAvatarFallback}</AvatarFallback>
                 </Avatar>
                 <div>
-                  <SheetTitle className="text-xl">{currentUser.name}</SheetTitle>
+                  <SheetTitle className="text-xl">{currentUser?.name || 'Player'}</SheetTitle>
                   <SheetDescription>Wallet: ₹{walletBalance.toFixed(2)}</SheetDescription>
                    <Button variant="link" className="p-0 h-auto text-accent" onClick={handleProfileClick}>View Profile</Button>
                 </div>
@@ -523,7 +482,7 @@ export function Sidebar({
       </Sheet>
       
       <DepositModal isOpen={activeModal === 'deposit'} onOpenChange={onModalOpenChange} settings={settings} />
-      <WithdrawModal isOpen={activeModal === 'withdraw'} onOpenChange={onModalOpenChange} settings={settings}/>
+      <WithdrawModal isOpen={activeModal === 'withdraw'} onOpenChange={onModalOpenChange} settings={settings} currentUser={currentUser} />
 
       <InfoModal 
         isOpen={!!activeModal && !['deposit', 'withdraw'].includes(activeModal)} 
