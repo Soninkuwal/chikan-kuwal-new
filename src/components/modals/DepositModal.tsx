@@ -30,6 +30,8 @@ type ModalProps = {
 const defaultSettings = {
     upiId: 'admin@upi',
     upiIdLarge: 'admin-large@upi',
+    minDeposit: 200,
+    maxDeposit: 2000,
 };
 
 export function DepositModal({ isOpen, onOpenChange }: ModalProps) {
@@ -85,7 +87,8 @@ export function DepositModal({ isOpen, onOpenChange }: ModalProps) {
 
   const handleSubmit = () => {
     const isUpi = activeTab === 'upi';
-    const amount = isUpi ? upiAmount : bankAmount;
+    const amountStr = isUpi ? upiAmount : bankAmount;
+    const amount = parseFloat(amountStr);
     const utr = isUpi ? upiUtr : bankUtr;
     const screenshot = isUpi ? upiScreenshot : bankScreenshot;
     const currentUserStr = localStorage.getItem('currentUser');
@@ -100,6 +103,15 @@ export function DepositModal({ isOpen, onOpenChange }: ModalProps) {
         variant: 'destructive',
         title: 'Incomplete Information',
         description: 'Please fill out all fields and upload a screenshot before submitting.',
+      });
+      return;
+    }
+
+    if (amount < settings.minDeposit || amount > settings.maxDeposit) {
+       toast({
+        variant: 'destructive',
+        title: 'Invalid Amount',
+        description: `Deposit amount must be between ₹${settings.minDeposit} and ₹${settings.maxDeposit}.`,
       });
       return;
     }
@@ -138,6 +150,7 @@ export function DepositModal({ isOpen, onOpenChange }: ModalProps) {
   }
   
   const numericUpiAmount = parseFloat(upiAmount) || 0;
+  const maxDepositForDefaultUpi = settings.maxDeposit;
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -158,13 +171,13 @@ export function DepositModal({ isOpen, onOpenChange }: ModalProps) {
             {/* UPI Tab */}
             <TabsContent value="upi" className="space-y-4 pt-4">
                 <div className="space-y-2">
-                <Label htmlFor="upi-amount">Amount (Min. ₹200)</Label>
+                <Label htmlFor="upi-amount">Amount (Min: ₹{settings.minDeposit}, Max: ₹{settings.maxDeposit})</Label>
                 <Input id="upi-amount" placeholder="Enter amount" type="number" value={upiAmount} onChange={(e) => setUpiAmount(e.target.value)} />
                 </div>
                 
-                {numericUpiAmount > 2000 ? (
+                {numericUpiAmount > maxDepositForDefaultUpi ? (
                     <div className="space-y-2 text-center p-4 bg-secondary rounded-lg">
-                        <Label>For amounts over ₹2000, please use this UPI ID:</Label>
+                        <Label>For amounts over ₹{maxDepositForDefaultUpi}, please use this UPI ID:</Label>
                          <div className="flex items-center gap-2">
                             <p className="flex-1 font-mono text-base p-2 bg-background rounded-md">{settings.upiIdLarge}</p>
                             <Button size="icon" variant="ghost" onClick={() => copyToClipboard(settings.upiIdLarge, 'UPI ID')}>
@@ -213,7 +226,7 @@ export function DepositModal({ isOpen, onOpenChange }: ModalProps) {
             {/* Bank Tab */}
             <TabsContent value="bank" className="space-y-4 pt-4">
                 <div className="space-y-2">
-                <Label htmlFor="bank-amount">Amount (Min. ₹200)</Label>
+                 <Label htmlFor="bank-amount">Amount (Min: ₹{settings.minDeposit}, Max: ₹{settings.maxDeposit})</Label>
                 <Input id="bank-amount" placeholder="Enter amount" type="number" value={bankAmount} onChange={(e) => setBankAmount(e.target.value)} />
                 </div>
                 <div className="p-4 bg-secondary rounded-md space-y-3 text-sm">
