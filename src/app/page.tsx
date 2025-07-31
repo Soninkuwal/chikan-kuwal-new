@@ -11,11 +11,11 @@ import BottomNavBar from '@/components/game/BottomNavBar';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Skeleton } from '@/components/ui/skeleton';
 import { app } from '@/lib/firebase';
-import { getDatabase, ref, update, push, set, get, child } from 'firebase/database';
+import { getDatabase, ref, update, push, set, get } from 'firebase/database';
 
 export type GameState = 'ready' | 'running' | 'finished';
 export type Difficulty = 'easy' | 'medium' | 'hard';
-const GAME_STEP_INTERVAL = 1000; // ms per step
+const GAME_STEP_INTERVAL = 100; // ms per step, increased for slower motion
 
 export default function Home() {
   const router = useRouter();
@@ -58,7 +58,6 @@ export default function Home() {
             setDifficulty(JSON.parse(savedDifficulty));
         }
     }
-    // Listen for changes in local storage from other tabs/windows
     window.addEventListener('storage', updateWalletInUI);
     return () => window.removeEventListener('storage', updateWalletInUI);
   }, [router]);
@@ -72,29 +71,37 @@ export default function Home() {
 
   const updateUserInDbAndLocal = (updates: any) => {
     const userStr = localStorage.getItem('currentUser');
-    if (!userStr) return;
+    if (!userStr) return Promise.reject("No current user found in local storage.");
 
     let user = JSON.parse(userStr);
     const userId = user.id;
-    if (!userId) return;
+    if (!userId) return Promise.reject(new Error("User ID not found in current user data."));
 
-    // Optimistically update local state and localStorage
-    const updatedUser = { ...user, ...updates };
-    Object.keys(updates).forEach(key => {
-        if (typeof updates[key] === 'object' && updates[key] !== null && !Array.isArray(updates[key])) {
-            updatedUser[key] = {...user[key], ...updates[key]};
-        }
-    });
-
-    localStorage.setItem('currentUser', JSON.stringify(updatedUser));
-    setCurrentUser(updatedUser); // Update React state to trigger re-render
-
-    // Update Firebase
     const db = getDatabase(app);
     const userRef = ref(db, `users/${userId}`);
-    update(userRef, updates).catch(error => {
+    
+    // Create the updated user object for local storage, ensuring the ID is preserved.
+    const updatedUserForLocal = { ...user, ...updates };
+
+    // If updates contain nested objects (like transactionHistory), merge them correctly.
+    Object.keys(updates).forEach(key => {
+        if (typeof updates[key] === 'object' && updates[key] !== null && !Array.isArray(updates[key]) && user[key]) {
+            updatedUserForLocal[key] = {...user[key], ...updates[key]};
+        }
+    });
+     // Ensure the ID is never lost
+    updatedUserForLocal.id = userId;
+
+
+    localStorage.setItem('currentUser', JSON.stringify(updatedUserForLocal));
+    setCurrentUser(updatedUserForLocal);
+    
+    // Update Firebase and return the promise
+    return update(userRef, updates).catch(error => {
       console.error("Firebase update failed:", error);
-      // Optional: handle error, maybe revert optimistic update
+      // Revert optimistic update on failure if necessary
+      localStorage.setItem('currentUser', JSON.stringify(user));
+      setCurrentUser(user);
     });
   };
 
@@ -139,6 +146,19 @@ export default function Home() {
 
   const handlePlay = () => {
     if (gameState === 'running' || !currentUser) return;
+    
+    const savedSettings = JSON.parse(localStorage.getItem('adminSettings') || '{}');
+    const minBet = Number(savedSettings.minBet) || 100;
+    const maxBet = Number(savedSettings.maxBet) || 5000;
+
+    if (betAmount < minBet || betAmount > maxBet) {
+      toast({
+        variant: "destructive",
+        title: "Invalid Bet Amount",
+        description: `Your bet must be between ₹${minBet} and ₹${maxBet}.`,
+      })
+      return;
+    }
 
     if (currentUser.wallet < betAmount) {
       toast({
@@ -156,7 +176,6 @@ export default function Home() {
     setMultiplier(1.0);
     setCurrentStep(0);
     
-    const savedSettings = JSON.parse(localStorage.getItem('adminSettings') || '{}');
     let min = 1.01, max = 2.00;
 
     switch(difficulty) {
@@ -187,7 +206,7 @@ export default function Home() {
     
     updateUserInDbAndLocal({ wallet: currentUser.wallet + winnings });
     addTransaction('Win', winnings, 'Completed');
-    addBetHistory('Win', betAmount, parseFloat(multiplier.toFixed(2)), winnings);
+    addBetHistory('Win', parseFloat(multiplier.toFixed(2)), betAmount, winnings);
 
     if (gameIntervalRef.current) clearInterval(gameIntervalRef.current);
     setGameState('finished');
@@ -220,12 +239,14 @@ export default function Home() {
       const startTime = Date.now();
       gameIntervalRef.current = setInterval(() => {
         const elapsedTime = (Date.now() - startTime) / 1000;
-        const newMultiplier = 1 + (elapsedTime * 0.1) + (elapsedTime * elapsedTime * 0.01);
+        // Slower multiplier progression for slow-motion effect
+        const newMultiplier = 1 + (elapsedTime * 0.05) + (elapsedTime * elapsedTime * 0.005);
         
         if (newMultiplier < crashPoint) {
           setMultiplier(newMultiplier);
           setCurrentStep(prev => prev + 1);
         } else {
+          setMultiplier(crashPoint);
           handleGameEnd(true);
         }
       }, GAME_STEP_INTERVAL);
@@ -285,5 +306,3 @@ export default function Home() {
     </div>
   );
 }
-
-    
