@@ -32,28 +32,15 @@ type KycRequest = {
 export default function OwnerKycRequestsPage() {
   const [requests, setRequests] = useState<KycRequest[]>([]);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [kycAutoApproveTime, setKycAutoApproveTime] = useState(5); // Default 5 minutes
   const { toast } = useToast();
 
-  useEffect(() => {
-    const db = getDatabase(app);
-    const requestsRef = ref(db, 'kycRequests');
-
-    const listener = onValue(requestsRef, (snapshot) => {
-        const data = snapshot.val();
-        if (data) {
-            const requestList = Object.keys(data).map(key => ({
-                id: key,
-                ...data[key]
-            }));
-            setRequests(requestList);
-        } else {
-            setRequests([]);
-        }
-    });
-
-    return () => {
-        off(requestsRef, 'value', listener);
-    };
+   useEffect(() => {
+    const savedSettings = localStorage.getItem('adminSettings');
+    if (savedSettings) {
+        const settings = JSON.parse(savedSettings);
+        setKycAutoApproveTime(parseInt(settings.kycAutoApproveTime || '5', 10));
+    }
   }, []);
 
   const handleAction = async (request: KycRequest, status: 'approved' | 'rejected') => {
@@ -94,6 +81,47 @@ export default function OwnerKycRequestsPage() {
     }
   };
 
+  useEffect(() => {
+    const db = getDatabase(app);
+    const requestsRef = ref(db, 'kycRequests');
+
+    const listener = onValue(requestsRef, (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            const requestList: KycRequest[] = Object.keys(data).map(key => ({
+                id: key,
+                ...data[key]
+            }));
+
+            const now = new Date();
+             requestList.forEach(req => {
+                const requestDate = new Date(req.date);
+                const diffMinutes = (now.getTime() - requestDate.getTime()) / (1000 * 60);
+                if (diffMinutes > kycAutoApproveTime) {
+                    // Automatically approve if older than the configured time
+                    handleAction(req, 'approved');
+                     toast({
+                      title: 'KYC Auto-Approved',
+                      description: `Request for ${req.user} was automatically approved.`
+                    })
+                }
+            });
+
+            setRequests(requestList.filter(req => {
+               const requestDate = new Date(req.date);
+               const diffMinutes = (now.getTime() - requestDate.getTime()) / (1000 * 60);
+               return diffMinutes <= kycAutoApproveTime;
+            }));
+        } else {
+            setRequests([]);
+        }
+    });
+
+    return () => {
+        off(requestsRef, 'value', listener);
+    };
+  }, [kycAutoApproveTime]);
+
   return (
     <>
       <div className="flex-1 space-y-4 p-8 pt-6">
@@ -103,7 +131,7 @@ export default function OwnerKycRequestsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Pending Verifications</CardTitle>
-            <CardDescription>Review and approve or reject user KYC submissions.</CardDescription>
+            <CardDescription>Review and approve or reject user KYC submissions. Requests older than {kycAutoApproveTime} minutes are auto-approved.</CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
