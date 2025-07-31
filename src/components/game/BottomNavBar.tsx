@@ -2,7 +2,7 @@
 'use client';
 import { Button } from "@/components/ui/button";
 import { Home, Wallet, User, Menu } from "lucide-react";
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { DepositModal } from '@/components/modals/DepositModal';
 import { WithdrawModal } from '@/components/modals/WithdrawModal';
 import { InfoModal } from '@/components/modals/InfoModal';
@@ -14,41 +14,28 @@ import { Upload } from 'lucide-react';
 
 type BottomNavBarProps = {
     onMenuClick: () => void;
+    currentUser: any;
 }
 
-export default function BottomNavBar({ onMenuClick }: BottomNavBarProps) {
+export default function BottomNavBar({ onMenuClick, currentUser }: BottomNavBarProps) {
     const [activeModal, setActiveModal] = useState<string | null>(null);
-    const [currentUser, setCurrentUser] = useState(() => {
-      if (typeof window !== 'undefined') {
-        const user = localStorage.getItem('currentUser');
-        if (user) {
-          const parsedUser = JSON.parse(user);
-          return {
-            name: parsedUser.name || 'User',
-            email: parsedUser.email,
-            avatar: parsedUser.avatar || 'https://placehold.co/100x100.png',
-            avatarFallback: (parsedUser.name || 'U').charAt(0).toUpperCase(),
-          }
-        }
-      }
-      return { name: 'User', email: 'user@example.com', avatar: 'https://placehold.co/100x100.png', avatarFallback: 'U' };
-    });
-    const [walletBalance, setWalletBalance] = useState(() => {
-      if(typeof window !== 'undefined') {
-        const user = localStorage.getItem('currentUser');
-        return user ? (JSON.parse(user).wallet || 0) : 0;
-      }
-      return 0;
-    });
-    const [tempUsername, setTempUsername] = useState(currentUser.name);
+    const [tempUsername, setTempUsername] = useState(currentUser?.name || 'User');
     const [isEditingProfile, setIsEditingProfile] = useState(false);
     const { toast } = useToast();
 
+    useEffect(() => {
+        if(currentUser) {
+            setTempUsername(currentUser.name);
+        }
+    }, [currentUser])
+
     const handleSaveProfile = () => {
+      // In a real app, you would update the database here.
+      // The parent page.tsx component handles the DB update via its listeners.
       const user = JSON.parse(localStorage.getItem('currentUser')!);
       user.name = tempUsername;
       localStorage.setItem('currentUser', JSON.stringify(user));
-      setCurrentUser(prev => ({...prev, name: tempUsername}));
+      // setCurrentUser(prev => ({...prev, name: tempUsername}));
       toast({title: "Profile Updated!", description: "Your username has been changed."});
       setIsEditingProfile(false);
     }
@@ -59,10 +46,13 @@ export default function BottomNavBar({ onMenuClick }: BottomNavBarProps) {
             const reader = new FileReader();
             reader.onloadend = () => {
                 const newAvatar = reader.result as string;
+                // In a real app, you would upload this to a storage service
+                // and then update the user's avatar URL in the database.
+                // For now, we'll just update localStorage and let the parent sync it.
                 const user = JSON.parse(localStorage.getItem('currentUser')!);
                 user.avatar = newAvatar;
                 localStorage.setItem('currentUser', JSON.stringify(user));
-                setCurrentUser(prev => ({...prev, avatar: newAvatar}));
+                // setCurrentUser(prev => ({...prev, avatar: newAvatar}));
                 toast({title: "Avatar Updated!", description: "Your new avatar has been set."});
             };
             reader.readAsDataURL(file);
@@ -74,6 +64,9 @@ export default function BottomNavBar({ onMenuClick }: BottomNavBarProps) {
             setActiveModal(null);
         }
     }
+
+    const userAvatar = currentUser?.avatar || `https://placehold.co/100x100.png?text=${(currentUser?.name || 'U').charAt(0).toUpperCase()}`;
+    const userAvatarFallback = (currentUser?.name || 'U').charAt(0).toUpperCase();
 
     return (
       <>
@@ -96,14 +89,14 @@ export default function BottomNavBar({ onMenuClick }: BottomNavBarProps) {
             </Button>
         </div>
         
-        <DepositModal isOpen={activeModal === 'deposit'} onOpenChange={onModalOpenChange} />
-        <WithdrawModal isOpen={activeModal === 'withdraw'} onOpenChange={onModalOpenChange} feeType="user" />
+        <DepositModal isOpen={activeModal === 'deposit'} onOpenChange={onModalOpenChange} settings={{}} />
+        <WithdrawModal isOpen={activeModal === 'withdraw'} onOpenChange={onModalOpenChange} feeType="user" settings={{}} currentUser={currentUser} />
 
         <InfoModal isOpen={activeModal === 'wallet'} onOpenChange={onModalOpenChange} title="My Wallet">
             <div className="space-y-6">
                 <div className="text-center space-y-2">
                     <p className="text-muted-foreground">Current Balance</p>
-                    <p className="text-4xl font-bold">₹{walletBalance.toFixed(2)}</p>
+                    <p className="text-4xl font-bold">₹{(currentUser?.wallet || 0).toFixed(2)}</p>
                 </div>
                 <div className="flex gap-4">
                     <Button className="w-full" onClick={() => { setActiveModal('deposit')}}>Deposit</Button>
@@ -117,8 +110,8 @@ export default function BottomNavBar({ onMenuClick }: BottomNavBarProps) {
                 <div className="flex flex-col items-center gap-4">
                      <div className="relative group">
                         <Avatar className="h-24 w-24 border-4 border-primary">
-                            <AvatarImage src={currentUser.avatar} alt={currentUser.name} />
-                            <AvatarFallback>{currentUser.avatarFallback}</AvatarFallback>
+                            <AvatarImage src={userAvatar} alt={currentUser?.name} />
+                            <AvatarFallback>{userAvatarFallback}</AvatarFallback>
                         </Avatar>
                         <Label htmlFor="avatar-upload-mobile" className="absolute inset-0 bg-black/50 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 cursor-pointer rounded-full transition-opacity">
                             <Upload className="h-6 w-6" />
@@ -127,8 +120,8 @@ export default function BottomNavBar({ onMenuClick }: BottomNavBarProps) {
                     </div>
                     {!isEditingProfile ? (
                         <div className="text-center">
-                            <h3 className="text-xl font-bold">{currentUser.name}</h3>
-                            <Button variant="link" onClick={() => { setTempUsername(currentUser.name); setIsEditingProfile(true); }}>Edit Name</Button>
+                            <h3 className="text-xl font-bold">{currentUser?.name}</h3>
+                            <Button variant="link" onClick={() => { setTempUsername(currentUser?.name); setIsEditingProfile(true); }}>Edit Name</Button>
                         </div>
                     ) : (
                         <div className="w-full space-y-2">
@@ -145,5 +138,3 @@ export default function BottomNavBar({ onMenuClick }: BottomNavBarProps) {
       </>
     )
 }
-
-    
