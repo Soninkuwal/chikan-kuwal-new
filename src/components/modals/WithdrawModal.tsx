@@ -26,14 +26,13 @@ type ModalProps = {
   onOpenChange: (isOpen: boolean) => void;
   feeType?: 'user' | 'owner' | 'none';
   settings: any;
+  currentUser: any;
 };
 
-export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user', settings }: ModalProps) {
+export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user', settings, currentUser }: ModalProps) {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('upi');
   const [amount, setAmount] = useState<number | string>('');
-  const [kycStatus, setKycStatus] = useState('Not Verified');
-  const [currentUser, setCurrentUser] = useState<any>(null);
 
   // UPI fields
   const [upiId, setUpiId] = useState('');
@@ -43,33 +42,11 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user', settings
   const [accountNumber, setAccountNumber] = useState('');
   const [ifscCode, setIfscCode] = useState('');
 
-  useEffect(() => {
-    let unsubscribe = () => {};
-    if (isOpen) {
-      const localUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-      setCurrentUser(localUser);
-      
-      if (localUser.id && feeType === 'user') {
-          const db = getDatabase(app);
-          const userRef = ref(db, `users/${localUser.id}`);
-
-          unsubscribe = onValue(userRef, (snapshot) => {
-              if (snapshot.exists()) {
-                  const dbUser = snapshot.val();
-                  setKycStatus(dbUser.kycStatus || 'Not Verified');
-                  setCurrentUser(dbUser); // Keep user data fresh
-              }
-          });
-      }
-    }
-    return () => unsubscribe();
-  }, [isOpen, feeType]);
-
   const fee = feeType === 'user' ? parseFloat(settings?.withdrawalFee || '10') : (feeType === 'owner' ? parseFloat(settings?.ownerFee || '2') : 0);
   const withdrawalInfo = settings?.withdrawalInfo || 'Default withdrawal info text.';
   const minWithdraw = parseFloat(settings?.minWithdraw || '500');
   const maxWithdraw = parseFloat(settings?.maxWithdraw || '10000');
-
+  const kycStatus = currentUser?.kycStatus || 'Not Verified';
 
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setAmount(e.target.value);
@@ -110,7 +87,14 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user', settings
       return;
     }
 
-    if (feeType === 'user' && (!currentUser || currentUser.wallet < numericAmount)) {
+    const effectiveUser = feeType === 'user' ? currentUser : { id: 'admin/owner', name: 'Admin/Owner' };
+
+    if (!effectiveUser) {
+        toast({ variant: 'destructive', title: 'Error', description: 'User not found.' });
+        return;
+    }
+
+    if (feeType === 'user' && (effectiveUser.wallet < numericAmount)) {
       toast({ variant: 'destructive', title: 'Insufficient Funds', description: 'You do not have enough funds to make this withdrawal.' });
       return;
     }
@@ -119,13 +103,13 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user', settings
     
     if(feeType === 'user') {
         // Deduct from wallet immediately
-        const newWalletBalance = currentUser.wallet - numericAmount;
-        await update(ref(db, `users/${currentUser.id}`), { wallet: newWalletBalance });
+        const newWalletBalance = effectiveUser.wallet - numericAmount;
+        await update(ref(db, `users/${effectiveUser.id}`), { wallet: newWalletBalance });
     }
 
     const newRequest = {
-        userId: currentUser?.id || 'admin/owner',
-        user: currentUser?.name || 'Admin/Owner',
+        userId: effectiveUser.id,
+        user: effectiveUser.name,
         amount: `₹${numericAmount.toFixed(2)}`,
         method: isUpi ? `UPI (${upiId})` : `Bank Transfer: Name: ${accountName}, Acct: ${accountNumber}, IFSC: ${ifscCode}`,
         date: new Date().toISOString(),
@@ -140,6 +124,12 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user', settings
       description: 'Your withdrawal request has been sent for admin approval.',
     });
     onOpenChange(false);
+    // Reset form
+    setAmount('');
+    setUpiId('');
+    setAccountName('');
+    setAccountNumber('');
+    setIfscCode('');
   }
 
   const numericAmount = Number(amount);
@@ -172,7 +162,7 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user', settings
                             <Info className="h-4 w-4" />
                             <AlertTitle>Withdrawal Policy</AlertTitle>
                             <AlertDescription>
-                            {`Min: ₹${minWithdraw} | Max: ₹${maxWithdraw}\\n${withdrawalInfo.replace('{fee}', String(fee))}`}
+                            {`Min: ₹${minWithdraw} | Max: ₹${maxWithdraw}\n${withdrawalInfo.replace('{fee}', String(fee))}`}
                             </AlertDescription>
                         </Alert>
                         )}
