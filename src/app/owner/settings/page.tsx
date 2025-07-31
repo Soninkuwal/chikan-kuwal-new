@@ -32,6 +32,9 @@ const defaultSettings = {
     howToPlay: '1. Select your bet amount.\n2. Choose the game difficulty.\n3. Click "Play" to start the game.\n4. Watch the multiplier increase.\n5. Click "Cash Out" before the game crashes to win.',
     supportInfo: 'For any support queries, please contact us at support@example.com or join our Telegram channel.',
     withdrawalInfo: 'The initial demo amount is not withdrawable. Withdrawals are subject to admin approval. A {fee}% processing fee will be applied to your winnings. You can only make one withdrawal every 24 hours.',
+    upiId: 'admin@upi',
+    upiIdLarge: 'admin-large@upi',
+    kycAutoApproveTime: '5',
 };
 
 export default function GlobalSettingsPage() {
@@ -42,6 +45,8 @@ export default function GlobalSettingsPage() {
         const savedSettings = localStorage.getItem('adminSettings');
         if (savedSettings) {
             setSettings(prev => ({...prev, ...JSON.parse(savedSettings)}));
+        } else {
+             localStorage.setItem('adminSettings', JSON.stringify(defaultSettings));
         }
     }, []);
 
@@ -85,6 +90,26 @@ export default function GlobalSettingsPage() {
                      <div className="space-y-2">
                         <Label htmlFor="withdrawalFee">Withdrawal Fee (%)</Label>
                         <Input id="withdrawalFee" value={settings.withdrawalFee} onChange={handleInputChange} type="number" />
+                    </div>
+                     <div className="space-y-2">
+                        <Label htmlFor="kycAutoApproveTime">KYC Auto-Approve Time (minutes)</Label>
+                        <Input id="kycAutoApproveTime" value={settings.kycAutoApproveTime} onChange={handleInputChange} type="number" />
+                    </div>
+                </CardContent>
+            </Card>
+            <Card>
+                <CardHeader>
+                    <CardTitle>Payment IDs</CardTitle>
+                    <CardDescription>Set the UPI IDs for receiving payments.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                        <Label htmlFor="upiId">Default UPI ID (For deposits up to ₹2000)</Label>
+                        <Input id="upiId" value={settings.upiId} onChange={handleInputChange} placeholder="e.g., yourname@upi" />
+                    </div>
+                    <div className="space-y-2">
+                        <Label htmlFor="upiIdLarge">Large Amount UPI ID (For deposits over ₹2000)</Label>
+                        <Input id="upiIdLarge" value={settings.upiIdLarge} onChange={handleInputChange} placeholder="e.g., business@upi" />
                     </div>
                 </CardContent>
             </Card>
@@ -221,5 +246,3 @@ export default function GlobalSettingsPage() {
     </div>
   )
 }
-
-    
