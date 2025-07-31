@@ -23,6 +23,7 @@ type ControlPanelProps = {
   multiplier: number;
   difficulty: Difficulty;
   onDifficultyChange: (difficulty: Difficulty) => void;
+  settings: any;
 };
 
 export default function ControlPanel({ 
@@ -33,10 +34,14 @@ export default function ControlPanel({
     onBetAmountChange, 
     multiplier,
     difficulty,
-    onDifficultyChange
+    onDifficultyChange,
+    settings
 }: ControlPanelProps) {
   
-  const betAmounts = [100, 300, 500, 1000, 1500, 2000];
+  const minBet = parseFloat(settings.minBet || '100');
+  const maxBet = parseFloat(settings.maxBet || '5000');
+
+  const betAmounts = [minBet, 300, 500, 1000, 1500, maxBet].filter((v, i, a) => a.indexOf(v) === i).sort((a,b) => a-b);
   const isRunning = gameState === 'running';
 
   return (
