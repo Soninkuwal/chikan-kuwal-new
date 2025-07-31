@@ -13,6 +13,7 @@ import { HandCoins, PlayIcon } from 'lucide-react'
 import Image from 'next/image'
 import { GameState, Difficulty } from '@/app/page'
 import { cn } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
 
 type ControlPanelProps = {
   gameState: GameState;
@@ -38,6 +39,28 @@ export default function ControlPanel({
   
   const betAmounts = [100, 300, 500, 1000, 1500, 2000];
   const isRunning = gameState === 'running';
+  const { toast } = useToast();
+  const [betLimits, setBetLimits] = useState({ min: 100, max: 5000 });
+
+  useEffect(() => {
+    const savedSettings = JSON.parse(localStorage.getItem('adminSettings') || '{}');
+    setBetLimits({
+        min: Number(savedSettings.minBet) || 100,
+        max: Number(savedSettings.maxBet) || 5000,
+    });
+  }, []);
+
+  const handleBetChange = (amount: number) => {
+    if (amount < betLimits.min || amount > betLimits.max) {
+      toast({
+        variant: 'destructive',
+        title: 'Invalid Bet Amount',
+        description: `Bet must be between ₹${betLimits.min} and ₹${betLimits.max}.`
+      });
+      return;
+    }
+    onBetAmountChange(amount);
+  }
 
   return (
     <div className="p-2 md:p-4">
@@ -46,9 +69,13 @@ export default function ControlPanel({
           {betAmounts.map(amount => (
             <button 
               key={amount} 
-              className={cn("amount-btn", {'active': betAmount === amount})}
-              onClick={() => onBetAmountChange(amount)}
-              disabled={isRunning}
+              className={cn(
+                "amount-btn", 
+                {'active': betAmount === amount},
+                {'opacity-50 cursor-not-allowed': amount < betLimits.min || amount > betLimits.max}
+              )}
+              onClick={() => handleBetChange(amount)}
+              disabled={isRunning || amount < betLimits.min || amount > betLimits.max}
             >
               ₹{amount}
             </button>
