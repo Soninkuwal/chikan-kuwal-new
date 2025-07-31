@@ -8,8 +8,9 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from '@/hooks/use-toast';
-import { getDatabase, ref, onValue, set } from 'firebase/database';
+import { getDatabase, ref, onValue, set, off } from 'firebase/database';
 import { app } from '@/lib/firebase';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const defaultSettings = {
     minBet: '100',
@@ -40,7 +41,7 @@ const defaultSettings = {
 
 export default function SettingsPage() {
     const { toast } = useToast();
-    const [settings, setSettings] = useState(defaultSettings);
+    const [settings, setSettings] = useState<any>(null);
 
     useEffect(() => {
         const db = getDatabase(app);
@@ -48,25 +49,26 @@ export default function SettingsPage() {
         const listener = onValue(settingsRef, (snapshot) => {
             if (snapshot.exists()) {
                 const dbSettings = snapshot.val();
-                setSettings(prev => ({...prev, ...dbSettings}));
+                setSettings((prev: any) => ({...(prev || defaultSettings), ...dbSettings}));
             } else {
                 // If no settings in DB, initialize with defaults
                 set(settingsRef, defaultSettings);
+                setSettings(defaultSettings);
             }
         });
 
         return () => {
-            settingsRef.off('value', listener);
+            off(settingsRef, 'value', listener);
         };
     }, []);
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
         const { id, value } = e.target;
-        setSettings(prev => ({ ...prev, [id]: value }));
+        setSettings((prev: any) => ({ ...prev, [id]: value }));
     };
     
     const handleSwitchChange = (checked: boolean, id: string) => {
-        setSettings(prev => ({...prev, [id]: checked}));
+        setSettings((prev: any) => ({...prev, [id]: checked}));
     };
 
     const handleSave = () => {
@@ -87,6 +89,21 @@ export default function SettingsPage() {
                 });
             });
     };
+
+  if (!settings) {
+    return (
+      <div className="flex-1 space-y-4 p-4 sm:p-8 pt-6">
+        <div className="flex items-center justify-between space-y-2">
+          <Skeleton className="h-10 w-64" />
+          <Skeleton className="h-10 w-40" />
+        </div>
+        <div className="grid gap-6 lg:grid-cols-2">
+            <Skeleton className="h-[400px] w-full" />
+            <Skeleton className="h-[400px] w-full" />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex-1 space-y-4 p-4 sm:p-8 pt-6">
