@@ -1,17 +1,16 @@
 
 'use client';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import GameHeader from '@/components/game/GameHeader';
 import GameScene from '@/components/game/GameScene';
 import ControlPanel from '@/components/game/ControlPanel';
 import { Sidebar } from '@/components/game/Sidebar';
 import { useToast } from '@/hooks/use-toast';
-import BottomNavBar from '@/components/game/BottomNavBar';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Skeleton } from '@/components/ui/skeleton';
 import { app } from '@/lib/firebase';
-import { getDatabase, ref, update, push, set, get, child } from 'firebase/database';
+import { getDatabase, ref, update, push, set, onValue } from 'firebase/database';
 
 export type GameState = 'ready' | 'running' | 'finished';
 export type Difficulty = 'easy' | 'medium' | 'hard';
@@ -21,6 +20,7 @@ export default function Home() {
   const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [settings, setSettings] = useState<any>({});
   const [isSidebarOpen, setSidebarOpen] = useState(false);
   const [gameState, setGameState] = useState<GameState>('ready');
   const [betAmount, setBetAmount] = useState<number>(100);
@@ -33,13 +33,38 @@ export default function Home() {
   const isMobile = useIsMobile();
   const gameIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
-  const updateWalletInUI = () => {
+  const updateUserAndSettings = useCallback(() => {
+    // Fetch Settings and store in local storage
+    const db = getDatabase(app);
+    const settingsRef = ref(db, 'settings');
+    onValue(settingsRef, (snapshot) => {
+        if (snapshot.exists()) {
+            const dbSettings = snapshot.val();
+            setSettings(dbSettings);
+            localStorage.setItem('adminSettings', JSON.stringify(dbSettings));
+        }
+    }, { onlyOnce: true });
+
+    // Fetch user and update UI
     const userStr = localStorage.getItem('currentUser');
     if (userStr) {
-      const user = JSON.parse(userStr);
-      setCurrentUser(user);
+        const user = JSON.parse(userStr);
+        if(user.id) {
+            const userRef = ref(db, `users/${user.id}`);
+            onValue(userRef, (snapshot) => {
+                if(snapshot.exists()){
+                    const dbUser = snapshot.val();
+                    setCurrentUser(dbUser);
+                    localStorage.setItem('currentUser', JSON.stringify(dbUser));
+                }
+            });
+        } else {
+             router.push('/auth');
+        }
+    } else {
+        router.push('/auth');
     }
-  };
+  }, [router]);
 
   useEffect(() => {
     const userStr = localStorage.getItem('currentUser');
@@ -47,21 +72,32 @@ export default function Home() {
       router.push('/auth');
     } else {
       setIsAuthenticated(true);
-      setCurrentUser(JSON.parse(userStr));
-      updateWalletInUI();
+      updateUserAndSettings(); // Initial fetch
+      
       const savedBetAmount = localStorage.getItem('betAmount');
-      if (savedBetAmount) {
-        setBetAmount(JSON.parse(savedBetAmount));
-      }
-       const savedDifficulty = localStorage.getItem('difficulty');
-        if (savedDifficulty) {
-            setDifficulty(JSON.parse(savedDifficulty));
+      if (savedBetAmount) setBetAmount(JSON.parse(savedBetAmount));
+      
+      const savedDifficulty = localStorage.getItem('difficulty');
+      if (savedDifficulty) setDifficulty(JSON.parse(savedDifficulty));
+    }
+    
+    // Listen for storage changes from other tabs/windows
+    window.addEventListener('storage', updateUserAndSettings);
+
+    return () => {
+        window.removeEventListener('storage', updateUserAndSettings);
+        // Detach Firebase listeners if any were attached for real-time updates in updateUserAndSettings
+        const db = getDatabase(app);
+        const userStr = localStorage.getItem('currentUser');
+        if (userStr) {
+            const user = JSON.parse(userStr);
+            if (user.id) {
+                const userRef = ref(db, `users/${user.id}`);
+                userRef.off();
+            }
         }
     }
-    // Listen for changes in local storage from other tabs/windows
-    window.addEventListener('storage', updateWalletInUI);
-    return () => window.removeEventListener('storage', updateWalletInUI);
-  }, [router]);
+  }, [router, updateUserAndSettings]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -70,33 +106,32 @@ export default function Home() {
     }
   }, [betAmount, difficulty, isAuthenticated]);
 
-  const updateUserInDbAndLocal = (updates: any) => {
+  const updateUserInDbAndLocal = async (updates: any) => {
     const userStr = localStorage.getItem('currentUser');
-    if (!userStr) return;
+    if (!userStr) return Promise.reject(new Error("Current user not found in local storage."));
 
     let user = JSON.parse(userStr);
     const userId = user.id;
-    if (!userId) return;
-
-    // Optimistically update local state and localStorage
-    const updatedUser = { ...user, ...updates };
+    if (!userId) return Promise.reject(new Error("User ID not found in current user data."));
+    
+    const db = getDatabase(app);
+    const userRef = ref(db, `users/${userId}`);
+    
+    // Merge updates with the existing user data to avoid overwriting nested objects
+    const updatedUser = {...user};
     Object.keys(updates).forEach(key => {
-        if (typeof updates[key] === 'object' && updates[key] !== null && !Array.isArray(updates[key])) {
-            updatedUser[key] = {...user[key], ...updates[key]};
+        if (typeof updates[key] === 'object' && updates[key] !== null && !Array.isArray(updates[key]) && updatedUser[key]) {
+            updatedUser[key] = {...updatedUser[key], ...updates[key]};
+        } else {
+            updatedUser[key] = updates[key];
         }
     });
 
     localStorage.setItem('currentUser', JSON.stringify(updatedUser));
-    setCurrentUser(updatedUser); // Update React state to trigger re-render
-
-    // Update Firebase
-    const db = getDatabase(app);
-    const userRef = ref(db, `users/${userId}`);
-    update(userRef, updates).catch(error => {
-      console.error("Firebase update failed:", error);
-      // Optional: handle error, maybe revert optimistic update
-    });
-  };
+    setCurrentUser(updatedUser);
+    
+    return update(userRef, updates);
+};
 
   const addTransaction = (type: 'Bet' | 'Win' | 'Deposit' | 'Withdrawal', amount: number, status: 'Completed' | 'Pending' | 'Failed' = 'Completed') => {
     const userStr = localStorage.getItem('currentUser');
@@ -138,7 +173,27 @@ export default function Home() {
   };
 
   const handlePlay = () => {
-    if (gameState === 'running' || !currentUser) return;
+    if (gameState === 'running' || !currentUser || !settings.minBet) return;
+    
+    const minBet = parseFloat(settings.minBet);
+    const maxBet = parseFloat(settings.maxBet);
+
+    if(betAmount < minBet) {
+         toast({
+            variant: "destructive",
+            title: "Bet Too Low",
+            description: `The minimum bet amount is ₹${minBet}.`,
+        });
+        return;
+    }
+    if(betAmount > maxBet) {
+         toast({
+            variant: "destructive",
+            title: "Bet Too High",
+            description: `The maximum bet amount is ₹${maxBet}.`,
+        });
+        return;
+    }
 
     if (currentUser.wallet < betAmount) {
       toast({
@@ -156,21 +211,20 @@ export default function Home() {
     setMultiplier(1.0);
     setCurrentStep(0);
     
-    const savedSettings = JSON.parse(localStorage.getItem('adminSettings') || '{}');
     let min = 1.01, max = 2.00;
 
     switch(difficulty) {
         case 'easy':
-            min = parseFloat(savedSettings.difficultyEasyMin || 1.01);
-            max = parseFloat(savedSettings.difficultyEasyMax || 2.00);
+            min = parseFloat(settings.difficultyEasyMin);
+            max = parseFloat(settings.difficultyEasyMax);
             break;
         case 'medium':
-            min = parseFloat(savedSettings.difficultyMediumMin || 1.50);
-            max = parseFloat(savedSettings.difficultyMediumMax || 5.00);
+            min = parseFloat(settings.difficultyMediumMin);
+            max = parseFloat(settings.difficultyMediumMax);
             break;
         case 'hard':
-            min = parseFloat(savedSettings.difficultyHardMin || 2.00);
-            max = parseFloat(savedSettings.difficultyHardMax || 10.00);
+            min = parseFloat(settings.difficultyHardMin);
+            max = parseFloat(settings.difficultyHardMax);
             break;
     }
 
@@ -187,7 +241,7 @@ export default function Home() {
     
     updateUserInDbAndLocal({ wallet: currentUser.wallet + winnings });
     addTransaction('Win', winnings, 'Completed');
-    addBetHistory('Win', betAmount, parseFloat(multiplier.toFixed(2)), winnings);
+    addBetHistory('Win', parseFloat(multiplier.toFixed(2)), betAmount, winnings);
 
     if (gameIntervalRef.current) clearInterval(gameIntervalRef.current);
     setGameState('finished');
@@ -243,7 +297,7 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameState, crashPoint]);
 
-  if (!isAuthenticated || !currentUser) {
+  if (!isAuthenticated || !currentUser || !settings.siteTitle) {
       return (
         <div className="flex h-screen w-full flex-col items-center justify-center bg-background p-4">
             <div className="space-y-4 w-full max-w-lg">
@@ -257,7 +311,7 @@ export default function Home() {
 
   return (
     <div className="relative flex h-screen w-full flex-col overflow-hidden bg-background font-body">
-      <GameHeader onMenuClick={() => setSidebarOpen(true)} walletBalance={currentUser.wallet} />
+      <GameHeader onMenuClick={() => setSidebarOpen(true)} walletBalance={currentUser.wallet} settings={settings} />
       <div className="relative flex-1 pb-40 md:pb-0">
         <GameScene 
           gameState={gameState} 
@@ -274,16 +328,16 @@ export default function Home() {
             multiplier={multiplier}
             difficulty={difficulty}
             onDifficultyChange={setDifficulty}
+            settings={settings}
         />
       </div>
       <Sidebar 
         isOpen={isSidebarOpen} 
         onOpenChange={setSidebarOpen} 
         walletBalance={currentUser.wallet}
+        settings={settings}
       />
       {isMobile && <BottomNavBar onMenuClick={() => setSidebarOpen(true)} />}
     </div>
   );
 }
-
-    
