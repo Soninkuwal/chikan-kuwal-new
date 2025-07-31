@@ -32,14 +32,14 @@ type KycRequest = {
 export default function OwnerKycRequestsPage() {
   const [requests, setRequests] = useState<KycRequest[]>([]);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [kycAutoApproveTime, setKycAutoApproveTime] = useState(5); // Default 5 minutes
+  const [kycAutoApproveTime, setKycAutoApproveTime] = useState(1); // Default 1 minute
   const { toast } = useToast();
 
    useEffect(() => {
     const savedSettings = localStorage.getItem('adminSettings');
     if (savedSettings) {
         const settings = JSON.parse(savedSettings);
-        setKycAutoApproveTime(parseInt(settings.kycAutoApproveTime || '5', 10));
+        setKycAutoApproveTime(parseInt(settings.kycAutoApproveTime || '1', 10));
     }
   }, []);
 
@@ -47,23 +47,20 @@ export default function OwnerKycRequestsPage() {
     const db = getDatabase(app);
     const requestRef = ref(db, `kycRequests/${request.id}`);
     
-    // Remove the request from the pending list in Firebase
     await remove(requestRef);
 
     const usersRef = ref(db, 'users');
     const snapshot = await get(usersRef);
 
     if (snapshot.exists()) {
-        let userToUpdate: any = null;
         let userKey: string | null = null;
         snapshot.forEach((childSnapshot) => {
             if (childSnapshot.val().id === request.userId) {
-                userToUpdate = childSnapshot.val();
                 userKey = childSnapshot.key;
             }
         });
 
-        if (userToUpdate && userKey) {
+        if (userKey) {
             const newKycStatus = status === 'approved' ? 'Verified' : 'Rejected';
             await update(ref(db, `users/${userKey}`), { kycStatus: newKycStatus });
             
@@ -94,24 +91,24 @@ export default function OwnerKycRequestsPage() {
             }));
 
             const now = new Date();
-             requestList.forEach(req => {
-                const requestDate = new Date(req.date);
-                const diffMinutes = (now.getTime() - requestDate.getTime()) / (1000 * 60);
-                if (diffMinutes > kycAutoApproveTime) {
-                    // Automatically approve if older than the configured time
-                    handleAction(req, 'approved');
-                     toast({
-                      title: 'KYC Auto-Approved',
-                      description: `Request for ${req.user} was automatically approved.`
-                    })
-                }
-            });
-
-            setRequests(requestList.filter(req => {
+            const pendingRequests: KycRequest[] = [];
+            
+            requestList.forEach(req => {
                const requestDate = new Date(req.date);
                const diffMinutes = (now.getTime() - requestDate.getTime()) / (1000 * 60);
-               return diffMinutes <= kycAutoApproveTime;
-            }));
+
+               if (diffMinutes > kycAutoApproveTime) {
+                   handleAction(req, 'approved');
+                    toast({
+                     title: 'KYC Auto-Approved',
+                     description: `Request for ${req.user} was automatically approved as it exceeded the ${kycAutoApproveTime} minute limit.`
+                   })
+               } else {
+                   pendingRequests.push(req);
+               }
+            });
+
+            setRequests(pendingRequests);
         } else {
             setRequests([]);
         }
@@ -120,6 +117,7 @@ export default function OwnerKycRequestsPage() {
     return () => {
         off(requestsRef, 'value', listener);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kycAutoApproveTime]);
 
   return (
@@ -131,7 +129,7 @@ export default function OwnerKycRequestsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Pending Verifications</CardTitle>
-            <CardDescription>Review and approve or reject user KYC submissions. Requests older than {kycAutoApproveTime} minutes are auto-approved.</CardDescription>
+            <CardDescription>Review and approve or reject user KYC submissions. Requests older than {kycAutoApproveTime} minute(s) are auto-approved.</CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
@@ -154,7 +152,7 @@ export default function OwnerKycRequestsPage() {
                     <TableCell>
                       <Button variant="outline" size="sm" onClick={() => setSelectedImage(req.documentImage)}>View</Button>
                     </TableCell>
-                    <TableCell>{req.date}</TableCell>
+                    <TableCell>{new Date(req.date).toLocaleString()}</TableCell>
                     <TableCell className="flex gap-2">
                       <Button variant="ghost" size="icon" className="text-green-500 hover:text-green-600 hover:bg-green-500/10" onClick={() => handleAction(req, 'approved')}>
                           <Check className="h-5 w-5" />
