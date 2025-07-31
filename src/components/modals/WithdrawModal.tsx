@@ -31,8 +31,13 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('upi');
   const [amount, setAmount] = useState<number | string>('');
-  const [fee, setFee] = useState(0);
-  const [withdrawalInfo, setWithdrawalInfo] = useState('');
+  const [settings, setSettings] = useState({
+      withdrawalFee: '10',
+      ownerFee: '2',
+      minWithdraw: '500',
+      maxWithdraw: '10000',
+      withdrawalInfo: 'The initial demo amount is not withdrawable. Withdrawals are subject to admin approval. A {fee}% processing fee will be applied to your winnings. You can only make one withdrawal every 24 hours.'
+  });
   const [kycStatus, setKycStatus] = useState('Not Verified');
   const [currentUser, setCurrentUser] = useState<any>(null);
 
@@ -48,9 +53,9 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
     let unsubscribe = () => {};
     if (isOpen) {
       const savedSettings = JSON.parse(localStorage.getItem('adminSettings') || '{}');
+      setSettings(prev => ({...prev, ...savedSettings}));
+
       const localUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-      setCurrentUser(localUser);
-      
       if (localUser.id) {
           const db = getDatabase(app);
           const userRef = ref(db, `users/${localUser.id}`);
@@ -63,19 +68,9 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
               }
           });
       }
-      
-
-      if (feeType === 'user') {
-        setFee(Number(savedSettings.withdrawalFee) || 10);
-        setWithdrawalInfo(savedSettings.withdrawalInfo || 'The initial demo amount is not withdrawable. Withdrawals are subject to admin approval. A {fee}% processing fee will be applied to your winnings. You can only make one withdrawal every 24 hours.');
-      } else if (feeType === 'owner') {
-          setFee(Number(savedSettings.ownerFee) || 2);
-      } else {
-          setFee(0);
-      }
     }
     return () => unsubscribe();
-  }, [isOpen, feeType]);
+  }, [isOpen]);
 
 
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -93,6 +88,11 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
     
     if (!numericAmount || numericAmount <= 0) {
       toast({ variant: 'destructive', title: 'Invalid Amount', description: 'Please enter a valid amount to withdraw.' });
+      return;
+    }
+
+     if (numericAmount < Number(settings.minWithdraw) || numericAmount > Number(settings.maxWithdraw)) {
+      toast({ variant: 'destructive', title: 'Invalid Amount', description: `Withdrawal amount must be between ₹${settings.minWithdraw} and ₹${settings.maxWithdraw}.` });
       return;
     }
 
@@ -136,7 +136,8 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
   }
 
   const numericAmount = Number(amount);
-  const feeAmount = numericAmount * (fee / 100);
+  const feePercent = feeType === 'owner' ? Number(settings.ownerFee) : Number(settings.withdrawalFee);
+  const feeAmount = numericAmount * (feePercent / 100);
   const receivedAmount = numericAmount - feeAmount;
 
   return (
@@ -165,17 +166,17 @@ export function WithdrawModal({ isOpen, onOpenChange, feeType = 'user' }: ModalP
                             <Info className="h-4 w-4" />
                             <AlertTitle>Please Note</AlertTitle>
                             <AlertDescription>
-                            {withdrawalInfo.replace('{fee}', String(fee))}
+                            {settings.withdrawalInfo.replace('{fee}', String(settings.withdrawalFee))}
                             </AlertDescription>
                         </Alert>
                         )}
                         <div className="space-y-2">
-                            <Label htmlFor="withdraw-amount">Amount</Label>
+                            <Label htmlFor="withdraw-amount">Amount (₹{settings.minWithdraw} - ₹{settings.maxWithdraw})</Label>
                             <Input id="withdraw-amount" placeholder="Enter amount" type="number" value={amount} onChange={handleAmountChange} />
                         </div>
-                        {numericAmount > 0 && fee > 0 && (
+                        {numericAmount > 0 && feePercent > 0 && (
                             <div className="p-3 bg-secondary rounded-md text-sm space-y-2">
-                                <div className="flex justify-between"><span>Processing Fee ({fee}%):</span> <span className="font-medium">- ₹{ feeAmount.toFixed(2) }</span></div>
+                                <div className="flex justify-between"><span>Processing Fee ({feePercent}%):</span> <span className="font-medium">- ₹{ feeAmount.toFixed(2) }</span></div>
                                 <div className="flex justify-between font-bold mt-2 pt-2 border-t border-border"><span>You will receive:</span> <span>₹{ receivedAmount.toFixed(2) }</span></div>
                             </div>
                         )}
