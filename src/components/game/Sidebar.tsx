@@ -50,6 +50,7 @@ type SidebarProps = {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
   walletBalance: number;
+  settings: any;
 };
 
 const adminChatInitialMessages = [
@@ -63,6 +64,7 @@ export function Sidebar({
   isOpen, 
   onOpenChange,
   walletBalance,
+  settings
 }: SidebarProps) {
   const router = useRouter();
   const [activeModal, setActiveModal] = useState<string | null>(null);
@@ -75,13 +77,12 @@ export function Sidebar({
   const [aadhaarNumber, setAadhaarNumber] = useState('');
   const [aadhaarFile, setAadhaarFile] = useState<File | null>(null);
 
-
-  const [poweredBy, setPoweredBy] = useState('yaar tera badmas hai jaanu');
-  const [infoContent, setInfoContent] = useState({
-      gameRules: '1. All players must be over 18 years of age.\\n2. Bets can only be placed before the round starts.\\n3. Winnings are calculated by multiplying the bet amount by the multiplier at the time of cash-out.\\n4. If the game crashes before you cash out, the bet is lost.',
-      howToPlay: '1. Select your bet amount.\\n2. Choose the game difficulty.\\n3. Click "Play" to start the game.\\n4. Watch the multiplier increase.\\n5. Click "Cash Out" before the game crashes to win.',
-      supportInfo: 'For any support queries, please contact us at support@example.com or join our Telegram channel.',
-  });
+  const poweredBy = settings?.poweredBy || 'yaar tera badmas hai jaanu';
+  const infoContent = {
+      gameRules: settings?.gameRules || 'No rules defined yet.',
+      howToPlay: settings?.howToPlay || 'No instructions defined yet.',
+      supportInfo: settings?.supportInfo || 'No support info defined yet.',
+  };
 
   const updateSidebarData = useCallback(() => {
     const userStr = localStorage.getItem('currentUser');
@@ -113,17 +114,6 @@ export function Sidebar({
         });
       }
     });
-
-     const savedSettings = localStorage.getItem('adminSettings');
-     if (savedSettings) {
-         const settings = JSON.parse(savedSettings);
-         setPoweredBy(settings.poweredBy || 'yaar tera badmas hai jaanu');
-         setInfoContent({
-             gameRules: settings.gameRules || 'No rules defined yet.',
-             howToPlay: settings.howToPlay || 'No instructions defined yet.',
-             supportInfo: settings.supportInfo || 'No support info defined yet.',
-         })
-     }
 
      return () => off(userRef, 'value', listener);
   }, []);
@@ -192,7 +182,7 @@ export function Sidebar({
       .then(() => {
         const updatedUser = { ...user, ...updates };
         localStorage.setItem('currentUser', JSON.stringify(updatedUser));
-        setCurrentUser(prev => ({...prev, name: tempUsername}));
+        setCurrentUser((prev: any) => ({...prev, name: tempUsername}));
         toast({title: "Profile Updated!", description: "Your username has been changed."});
         setIsEditingProfile(false);
       })
@@ -219,7 +209,7 @@ export function Sidebar({
                 .then(() => {
                   const updatedUser = { ...user, ...updates };
                   localStorage.setItem('currentUser', JSON.stringify(updatedUser));
-                  setCurrentUser(prev => ({...prev, avatar: newAvatar}));
+                  setCurrentUser((prev: any) => ({...prev, avatar: newAvatar}));
                   toast({title: "Avatar Updated!", description: "Your new avatar has been set."});
                 })
                 .catch(error => {
@@ -246,8 +236,7 @@ export function Sidebar({
             documentType: 'Aadhaar',
             documentNumber: aadhaarNumber,
             documentImage: documentImage,
-            date: new Date().toLocaleString(),
-            createdAt: Date.now(),
+            date: new Date().toISOString(),
         };
 
         const db = getDatabase(app);
@@ -533,8 +522,8 @@ export function Sidebar({
         </SheetContent>
       </Sheet>
       
-      <DepositModal isOpen={activeModal === 'deposit'} onOpenChange={onModalOpenChange} />
-      <WithdrawModal isOpen={activeModal === 'withdraw'} onOpenChange={onModalOpenChange} />
+      <DepositModal isOpen={activeModal === 'deposit'} onOpenChange={onModalOpenChange} settings={settings} />
+      <WithdrawModal isOpen={activeModal === 'withdraw'} onOpenChange={onModalOpenChange} settings={settings}/>
 
       <InfoModal 
         isOpen={!!activeModal && !['deposit', 'withdraw'].includes(activeModal)} 
