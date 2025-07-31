@@ -59,17 +59,17 @@ export default function WithdrawalRequestsPage() {
 
         if (snapshot.exists()) {
             let userToUpdate: any = null;
-            let userIdToUpdate: string | null = null;
+            let userKeyToUpdate: string | null = null;
             snapshot.forEach((childSnapshot) => {
                 if (childSnapshot.val().id === request.userId) {
                     userToUpdate = childSnapshot.val();
-                    userIdToUpdate = childSnapshot.key;
+                    userKeyToUpdate = childSnapshot.key;
                 }
             });
 
-            if (userToUpdate && userIdToUpdate) {
+            if (userToUpdate && userKeyToUpdate) {
                 const newBalance = (userToUpdate.wallet || 0) + parseFloat(request.amount.replace('₹', ''));
-                await update(ref(db, `users/${userIdToUpdate}`), { wallet: newBalance });
+                await update(ref(db, `users/${userKeyToUpdate}`), { wallet: newBalance });
 
                 toast({ variant: 'destructive', title: 'Request Rejected', description: `Withdrawal for ${request.user} has been rejected and funds returned.`});
             } else {
