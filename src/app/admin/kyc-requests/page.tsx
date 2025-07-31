@@ -27,21 +27,24 @@ type KycRequest = {
     documentNumber: string;
     documentImage: string;
     date: string;
-    createdAt: number;
 };
 
 export default function KycRequestsPage() {
   const [requests, setRequests] = useState<KycRequest[]>([]);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [autoApproveTime, setAutoApproveTime] = useState(5 * 60 * 1000); // default 5 minutes
   const { toast } = useToast();
+  const [settings, setSettings] = useState({ kycAutoApproveTime: '0' });
 
   useEffect(() => {
-    const savedSettings = localStorage.getItem('adminSettings');
-    if (savedSettings) {
-        const settings = JSON.parse(savedSettings);
-        setAutoApproveTime(parseInt(settings.kycAutoApproveTime, 10) * 60 * 1000);
-    }
+    const db = getDatabase(app);
+    const settingsRef = ref(db, 'settings');
+    const settingsListener = onValue(settingsRef, (snapshot) => {
+        if (snapshot.exists()) {
+            setSettings(snapshot.val());
+        }
+    });
+
+    return () => off(settingsRef, 'value', settingsListener);
   }, []);
 
   const handleAction = async (request: KycRequest, status: 'approved' | 'rejected') => {
@@ -57,10 +60,8 @@ export default function KycRequestsPage() {
         let userToUpdate: any = null;
         let userKey: string | null = null;
         snapshot.forEach((childSnapshot) => {
-            const userData = childSnapshot.val();
-            // In case the user document key is not the user's ID
-            if (userData.id === request.userId) {
-                userToUpdate = userData;
+            if (childSnapshot.val().id === request.userId) {
+                userToUpdate = childSnapshot.val();
                 userKey = childSnapshot.key;
             }
         });
@@ -89,18 +90,24 @@ export default function KycRequestsPage() {
 
     const listener = onValue(requestsRef, (snapshot) => {
         const data = snapshot.val();
-        const now = Date.now();
         const requestList: KycRequest[] = [];
-        
+        const approveTime = parseFloat(settings.kycAutoApproveTime);
+
         if (data) {
-            Object.keys(data).forEach(key => {
-                const req = { id: key, ...data[key] };
-                 if (now - req.createdAt > autoApproveTime) {
-                    handleAction(req, 'approved');
-                } else {
-                    requestList.push(req);
+            const now = new Date();
+            for (const key in data) {
+                const request = { id: key, ...data[key] };
+                if (approveTime >= 0) {
+                    const requestDate = new Date(request.date);
+                    const minutesDiff = (now.getTime() - requestDate.getTime()) / (1000 * 60);
+
+                    if (minutesDiff >= approveTime) {
+                        handleAction(request, 'approved');
+                        continue; // Skip adding to the list as it's being processed
+                    }
                 }
-            });
+                requestList.push(request);
+            }
             setRequests(requestList);
         } else {
             setRequests([]);
@@ -110,8 +117,7 @@ export default function KycRequestsPage() {
     return () => {
         off(requestsRef, 'value', listener);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoApproveTime]);
+  }, [settings.kycAutoApproveTime]);
 
   return (
     <>
@@ -122,7 +128,7 @@ export default function KycRequestsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Pending Verifications</CardTitle>
-            <CardDescription>Review and approve or reject user KYC submissions.</CardDescription>
+            <CardDescription>Review and approve or reject user KYC submissions. Auto-approval is set to {settings.kycAutoApproveTime} minutes.</CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
@@ -145,7 +151,7 @@ export default function KycRequestsPage() {
                     <TableCell>
                       <Button variant="outline" size="sm" onClick={() => setSelectedImage(req.documentImage)}>View</Button>
                     </TableCell>
-                    <TableCell>{req.date}</TableCell>
+                    <TableCell>{new Date(req.date).toLocaleString()}</TableCell>
                     <TableCell className="flex gap-2">
                       <Button variant="ghost" size="icon" className="text-green-500 hover:text-green-600 hover:bg-green-500/10" onClick={() => handleAction(req, 'approved')}>
                           <Check className="h-5 w-5" />
